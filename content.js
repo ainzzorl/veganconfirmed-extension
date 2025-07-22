@@ -1,6 +1,16 @@
 // Global flag to prevent multiple simultaneous analyses
 let isAnalyzing = false;
 
+// Global flag to control console logging
+let enableLogging = true;
+
+// Helper function for conditional logging
+function log(...args) {
+  if (enableLogging) {
+    console.log(...args);
+  }
+}
+
 // Function to clean up duplicate new lines in markdown
 function cleanMarkdown(markdown) {
   // Replace multiple consecutive new lines with maximum of 2
@@ -166,14 +176,14 @@ function sendContentForAnalysis(content) {
       content: content,
     },
     (response) => {
-      console.log("Content sent for AI analysis, response:", response);
+      log("Content sent for AI analysis, response:", response);
     }
   );
 }
 
 // Function to trigger analysis manually
 function triggerAnalysis() {
-  console.log("Manual analysis triggered");
+  log("Manual analysis triggered");
   const extractedContent = extractPageContent();
   sendContentForAnalysis(extractedContent);
 }
@@ -273,7 +283,7 @@ function detectAddToCartButtons() {
 function handleAddToCartClick(event) {
   // Prevent multiple simultaneous analyses
   if (isAnalyzing) {
-    console.log("Analysis already in progress, skipping...");
+    log("Analysis already in progress, skipping...");
     return;
   }
 
@@ -292,11 +302,11 @@ function handleAddToCartClick(event) {
     href: button.href || "No href",
   };
 
-  console.log(
+  log(
     "Vegan Confirmed: Add to cart button clicked - Button details:",
     buttonInfo
   );
-  console.log("Vegan Confirmed: Button element:", button);
+  log("Vegan Confirmed: Button element:", button);
 
   isAnalyzing = true;
 
@@ -314,7 +324,7 @@ function handleAddToCartClick(event) {
 function setupCartDetection() {
   // Initial detection
   const cartButtons = detectAddToCartButtons();
-  console.log(
+  log(
     "Vegan Confirmed: Detected",
     cartButtons.length,
     "cart buttons on page"
@@ -325,7 +335,7 @@ function setupCartDetection() {
     if (!button.hasAttribute("data-vegan-analyzed")) {
       button.setAttribute("data-vegan-analyzed", "true");
       button.addEventListener("click", handleAddToCartClick);
-      console.log(
+      log(
         "Vegan Confirmed: Added listener to button:",
         button.textContent?.substring(0, 50) || button.className || button.id
       );
@@ -360,7 +370,7 @@ function setupCartDetection() {
         if (!button.hasAttribute("data-vegan-analyzed")) {
           button.setAttribute("data-vegan-analyzed", "true");
           button.addEventListener("click", handleAddToCartClick);
-          console.log(
+          log(
             "Vegan Confirmed: Added listener to dynamically added button:",
             button.textContent?.substring(0, 50) ||
             button.className ||
@@ -376,19 +386,27 @@ function setupCartDetection() {
     subtree: true,
   });
 
-  console.log("Vegan Confirmed: Cart detection setup complete");
+  log("Vegan Confirmed: Cart detection setup complete");
 }
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("Content script received message:", message);
+  log("Content script received message:", message);
 
   if (message.type === "TRIGGER_ANALYSIS") {
     triggerAnalysis();
     sendResponse({ status: "analysis_triggered" });
+  } else if (message.type === "TOGGLE_LOGGING") {
+    const newState = toggleLogging();
+    sendResponse({ status: "logging_toggled", enabled: newState });
+  } else if (message.type === "SET_LOGGING") {
+    const newState = setLogging(message.enabled);
+    sendResponse({ status: "logging_set", enabled: newState });
+  } else if (message.type === "GET_LOGGING_STATE") {
+    sendResponse({ status: "logging_state", enabled: enableLogging });
   }
 });
 
 // Initialize content script and setup cart detection
-console.log("Content script loaded - setting up cart detection");
+log("Content script loaded - setting up cart detection");
 setupCartDetection();
