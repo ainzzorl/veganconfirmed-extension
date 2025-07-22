@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Vegan Confirmed Analysis</title>
+    <style>
+        body {
+            width: 400px;
+            padding: 15px;
+            font-family: Arial, sans-serif;
+        }
+
+        .section {
+            margin-bottom: 15px;
+        }
+
+        .title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .vegan-status {
+            font-size: 18px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .vegan {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .not-vegan {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .not-vegan.high-confidence {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .not-vegan.medium-confidence {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            border: 1px solid #ffcc02;
+        }
+
+        .not-vegan.low-confidence {
+            background-color: #fff8e1;
+            color: #f57c00;
+            border: 1px solid #ffecb3;
+        }
+
+        .unknown {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .not-shopping {
+            background-color: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #bbdefb;
+        }
+
+        .explanation {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .confidence {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .error {
+            color: #f44336;
+            font-style: italic;
+        }
+
+        .analyze-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        .analyze-button:hover {
+            background-color: #45a049;
+        }
+
+        .analyze-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .button-container {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        /* Tab styles */
+        .tab-container {
+            margin-bottom: 15px;
+        }
+
+        .tab-buttons {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 15px;
+        }
+
+        .tab-button {
+            flex: 1;
+            padding: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            color: #666;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab-button.active {
+            color: #4CAF50;
+            border-bottom-color: #4CAF50;
+        }
+
+        .tab-button:hover {
+            background-color: #f5f5f5;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* History styles */
+        .history-item {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .history-item:hover {
+            background-color: #f0f0f0;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .history-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .history-url {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+
+        .history-date {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 8px;
+        }
+
+        .history-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .history-status.vegan {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .history-status.not-vegan {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .history-status.not-vegan.high-confidence {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+
+        .history-status.not-vegan.medium-confidence {
+            background-color: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .history-status.not-vegan.low-confidence {
+            background-color: #fff8e1;
+            color: #f57c00;
+        }
+
+        .history-status.unknown {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .history-status.not-shopping {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .history-summary {
+            font-size: 13px;
+            color: #555;
+            line-height: 1.3;
+        }
+
+        .history-confidence {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .history-avoided-ingredients {
+            font-size: 11px;
+            color: #e65100;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .history-empty {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+
+        .clear-history-btn {
+            background-color: #f44336;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .clear-history-btn:hover {
+            background-color: #d32f2f;
+        }
+
+        /* Settings styles */
+        .ingredients-container {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+
+        .ingredient-item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin-bottom: 5px;
+            background-color: white;
+            border-radius: 3px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .ingredient-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .ingredient-checkbox {
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+
+        .ingredient-label {
+            flex: 1;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .ingredient-remove {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .ingredient-remove:hover {
+            background-color: #d32f2f;
+        }
+
+        .custom-ingredient-input {
+            display: flex;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+
+        .custom-ingredient-input input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+
+        .add-ingredient-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .add-ingredient-btn:hover {
+            background-color: #45a049;
+        }
+
+        /* Avoided ingredients warning styles */
+        .avoided-ingredients-warning {
+            background-color: #fff3e0;
+            border: 1px solid #ffb74d;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .avoided-ingredients-warning .warning-icon {
+            font-size: 16px;
+            margin-right: 8px;
+        }
+
+        .avoided-ingredients-warning strong {
+            color: #e65100;
+            font-size: 14px;
+        }
+
+        .avoided-ingredients-warning .ingredients-list {
+            margin-top: 8px;
+            color: #bf360c;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="tab-container">
+        <div class="tab-buttons">
+            <button class="tab-button active" data-tab="current">Current Item</button>
+            <button class="tab-button" data-tab="history">History</button>
+            <button class="tab-button" data-tab="settings">Settings</button>
+        </div>
+    </div>
+
+    <div id="current-tab" class="tab-content active">
+        <div class="button-container">
+            <button id="analyzeButton" class="analyze-button">🌱 Check if the product is vegan</button>
+        </div>
+        <div id="loading" class="loading" style="display: none;">Analyzing page content...</div>
+        <div id="content" style="display: none;">
+            <div class="section">
+                <div id="veganStatus" class="vegan-status"></div>
+                <div id="confidence" class="confidence"></div>
+            </div>
+            <div class="section">
+                <div class="title">Details:</div>
+                <div id="explanation" class="explanation"></div>
+            </div>
+            <div class="section">
+                <div id="avoided-ingredients" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-tab" class="tab-content">
+        <div id="history-content">
+            <div class="history-empty">Loading history...</div>
+        </div>
+        <button id="clearHistoryBtn" class="clear-history-btn" style="display: none;">Clear History</button>
+    </div>
+
+    <div id="settings-tab" class="tab-content">
+        <div class="section">
+            <div class="title">Materials & Ingredients to Avoid</div>
+            <div class="explanation">
+                Additional ingredients you'd like to flag during analysis (e.g. palm oil). You don't need to add
+                animal-derived ingredients - Vegan Confirmed knows them already.
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="custom-ingredient-input">
+                <input type="text" id="customIngredient" placeholder="Add ingredient..." />
+                <button id="addCustomIngredient" class="add-ingredient-btn">Add</button>
+            </div>
+            <div id="custom-ingredients-list" class="ingredients-container">
+                <!-- Custom ingredients will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
