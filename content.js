@@ -2,7 +2,7 @@
 let isAnalyzing = false;
 
 // Global flag to control console logging
-let enableLogging = true;
+let enableLogging = false;
 
 // Helper function for conditional logging
 function log(...args) {
