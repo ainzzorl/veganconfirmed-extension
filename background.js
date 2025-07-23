@@ -312,22 +312,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ status: 'received' });
 });
 
-// Check backend health on startup
-async function checkBackendHealth() {
-    try {
-        const response = await fetch(`${BACKEND_URL}/health`);
-        if (response.ok) {
-            console.log('Backend is healthy');
-        } else {
-            console.warn('Backend health check failed');
-        }
-    } catch (error) {
-        console.error('Backend health check error:', error);
-    }
-}
 
-// Check backend health when extension loads
-checkBackendHealth();
 
 // Clean up expired cache on startup and every hour
 cleanupExpiredCache();
