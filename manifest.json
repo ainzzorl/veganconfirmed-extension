@@ -4,8 +4,6 @@
   "version": "1.0",
   "description": "Vegan shopping assistant",
   "permissions": [
-    "activeTab",
-    "scripting",
     "storage",
     "notifications"
   ],
