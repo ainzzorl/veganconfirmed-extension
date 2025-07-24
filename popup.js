@@ -192,44 +192,40 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (chrome.runtime.lastError) {
                     console.error('Error sending message to content script:', chrome.runtime.lastError);
                     displayError('Could not analyze this page. Please refresh and try again.');
+                    resetButton();
                     return;
                 }
 
-                // Start polling for analysis results
-                pollForResults();
+                // Analysis is now triggered, results will come via message
+                console.log('Analysis triggered successfully');
+
+                // Set a timeout in case the analysis takes too long
+                setTimeout(function () {
+                    if (loadingDiv.style.display !== 'none') {
+                        displayError('Analysis timed out. Please try again.');
+                        resetButton();
+                    }
+                }, 30000); // 30 second timeout
             });
         });
     }
 
-    function pollForResults() {
-        const pollInterval = setInterval(function () {
-            chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-                const currentUrl = tabs[0].url;
-                const analysisKey = `${currentUrl}_analysis`;
-
-                chrome.storage.local.get([analysisKey], function (result) {
-                    const analysisData = result[analysisKey];
-
-                    if (analysisData && analysisData.analysis) {
-                        clearInterval(pollInterval);
-                        displayAnalysis(analysisData.analysis, false);
-                        resetButton();
-                        // Reload history to show the new analysis
-                        loadAnalysisHistory();
-                    }
-                });
-            });
-        }, 1000); // Poll every second
-
-        // Stop polling after 30 seconds
-        setTimeout(function () {
-            clearInterval(pollInterval);
-            if (loadingDiv.style.display !== 'none') {
-                displayError('Analysis timed out. Please try again.');
+    // Listen for analysis results from content script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === 'ANALYSIS_RESULT_FOR_POPUP') {
+            console.log('Received analysis result:', message.result);
+            if (message.result && message.result.analysis) {
+                displayAnalysis(message.result.analysis, false);
                 resetButton();
+                // Reload history to show the new analysis
+                loadAnalysisHistory();
             }
-        }, 30000);
-    }
+        } else if (message.type === 'ANALYSIS_ERROR_FOR_POPUP') {
+            console.log('Received analysis error:', message.error);
+            displayError(message.error || 'Analysis failed. Please try again.');
+            resetButton();
+        }
+    });
 
     function resetButton() {
         analyzeButton.disabled = false;

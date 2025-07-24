@@ -396,14 +396,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "TRIGGER_ANALYSIS") {
     triggerAnalysis();
     sendResponse({ status: "analysis_triggered" });
-  } else if (message.type === "TOGGLE_LOGGING") {
-    const newState = toggleLogging();
-    sendResponse({ status: "logging_toggled", enabled: newState });
-  } else if (message.type === "SET_LOGGING") {
-    const newState = setLogging(message.enabled);
-    sendResponse({ status: "logging_set", enabled: newState });
-  } else if (message.type === "GET_LOGGING_STATE") {
-    sendResponse({ status: "logging_state", enabled: enableLogging });
   }
 });
 

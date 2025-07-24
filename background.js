@@ -302,8 +302,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendContentAnalysis(message.content).then(result => {
             if (result) {
                 console.log('Analysis completed successfully');
+
+                // Send the result directly to the popup
+                chrome.runtime.sendMessage({
+                    type: 'ANALYSIS_RESULT_FOR_POPUP',
+                    result: result
+                }).catch(error => {
+                    console.log('Could not send result to popup:', error);
+                });
             } else {
                 console.log('Analysis failed or timed out');
+
+                // Send error message directly to popup
+                chrome.runtime.sendMessage({
+                    type: 'ANALYSIS_ERROR_FOR_POPUP',
+                    error: 'Analysis failed or timed out'
+                }).catch(error => {
+                    console.log('Could not send error to popup:', error);
+                });
             }
         });
     }
