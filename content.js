@@ -124,7 +124,7 @@ function elementToMarkdown(element) {
 }
 
 // Function to extract clean text content from the current page for AI analysis
-function extractPageContent() {
+function extractPageContent(triggerType = "manual", triggerElementText = null) {
   // Clone the body to avoid modifying the original page
   const bodyClone = document.body.cloneNode(true);
 
@@ -165,6 +165,8 @@ function extractPageContent() {
     title: document.title,
     timestamp: new Date().toISOString(),
     content: markdownContent,
+    trigger_type: triggerType,
+    trigger_element_text: triggerElementText,
   };
 }
 
@@ -184,7 +186,7 @@ function sendContentForAnalysis(content) {
 // Function to trigger analysis manually
 function triggerAnalysis() {
   log("Manual analysis triggered");
-  const extractedContent = extractPageContent();
+  const extractedContent = extractPageContent("manual", null);
   sendContentForAnalysis(extractedContent);
 }
 
@@ -310,8 +312,15 @@ function handleAddToCartClick(event) {
 
   isAnalyzing = true;
 
+  // Get button text for trigger information
+  const triggerElementText = button.textContent?.trim() ||
+    button.value?.trim() ||
+    button.getAttribute("aria-label")?.trim() ||
+    button.getAttribute("title")?.trim() ||
+    "Unknown button";
+
   // Trigger analysis
-  const extractedContent = extractPageContent();
+  const extractedContent = extractPageContent("automatic", triggerElementText);
   sendContentForAnalysis(extractedContent);
 
   // Reset analyzing flag after a reasonable timeout
