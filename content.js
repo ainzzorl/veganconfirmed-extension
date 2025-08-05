@@ -202,7 +202,10 @@ function detectAddToCartButtons() {
   allButtons.forEach((button) => {
     const text =
       button.textContent?.toLowerCase() || button.value?.toLowerCase() || "";
-    const className = button.className?.toLowerCase() || "";
+    let className = "";
+    if (typeof button.className === "string") {
+      className = button.className.toLowerCase();
+    }
     const id = button.id?.toLowerCase() || "";
     const ariaLabel = button.getAttribute("aria-label")?.toLowerCase() || "";
     const title = button.getAttribute("title")?.toLowerCase() || "";
