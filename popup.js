@@ -141,12 +141,22 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 }
 
+                // Build cruelty-free status HTML (only for applicable products)
+                let crueltyFreeHTML = '';
+                if (item.is_cruelty_free !== null && item.is_cruelty_free !== undefined) {
+                    if (item.is_cruelty_free === true) {
+                        crueltyFreeHTML = '<span class="history-cruelty-status cruelty-free">🐰 Cruelty-Free</span>';
+                    } else if (item.is_cruelty_free === false) {
+                        crueltyFreeHTML = '<span class="history-cruelty-status not-cruelty-free">⚠️ Not Cruelty-Free</span>';
+                    }
+                }
+
                 return `
                     <div class="history-item" data-url="${sanitizeHTML(item.url)}">
                         <div class="history-title">${sanitizeHTML(item.title)}</div>
                         <div class="history-url">${sanitizeHTML(item.url)}</div>
                         <div class="history-date">${sanitizeHTML(item.date)}</div>
-                        <div class="history-status ${statusClass}">${sanitizeHTML(statusText)}</div>
+                        <div class="history-status ${statusClass}">${sanitizeHTML(statusText)}${crueltyFreeHTML}</div>
                         ${item.confidence_level ? `<div class="history-confidence">Confidence: ${sanitizeHTML(item.confidence_level.toUpperCase())}</div>` : ''}
                         ${item.summary ? `<div class="history-summary">${sanitizeHTML(item.summary)}</div>` : ''}
                         ${item.user_avoided_ingredients && item.user_avoided_ingredients.length > 0 ?
@@ -340,6 +350,40 @@ function displayAnalysis(analysis, isWarningAnalysis = false) {
         avoidedIngredientsElement.style.display = 'none';
     }
 
+    // Display cruelty-free status (only for applicable product types)
+    const crueltyFreeSection = document.getElementById('crueltyFreeSection');
+    const crueltyFreeStatus = document.getElementById('crueltyFreeStatus');
+    const crueltyFreeExplanation = document.getElementById('crueltyFreeExplanation');
+
+    // Only show cruelty-free section if is_cruelty_free is not null (applicable product type)
+    if (analysis.is_cruelty_free !== null && analysis.is_cruelty_free !== undefined) {
+        crueltyFreeSection.style.display = 'block';
+
+        if (analysis.is_cruelty_free === true) {
+            crueltyFreeStatus.textContent = '\u{1F430} Cruelty-Free';
+            crueltyFreeStatus.className = 'cruelty-status cruelty-free';
+        } else if (analysis.is_cruelty_free === false) {
+            crueltyFreeStatus.textContent = '\u{26A0}\u{FE0F} Not Cruelty-Free';
+            crueltyFreeStatus.className = 'cruelty-status not-cruelty-free';
+        }
+
+        // Display cruelty-free explanation if available
+        if (analysis.cruelty_free_explanation) {
+            crueltyFreeExplanation.textContent = analysis.cruelty_free_explanation;
+            crueltyFreeExplanation.style.display = 'block';
+        } else {
+            crueltyFreeExplanation.style.display = 'none';
+        }
+    } else if (analysis.cruelty_free_explanation && analysis.is_cruelty_free === null) {
+        // Show section with unknown status if there's an explanation but no determination
+        crueltyFreeSection.style.display = 'block';
+        crueltyFreeStatus.textContent = '\u{2753} Cruelty-Free Status Unknown';
+        crueltyFreeStatus.className = 'cruelty-status cruelty-unknown';
+        crueltyFreeExplanation.textContent = analysis.cruelty_free_explanation;
+        crueltyFreeExplanation.style.display = 'block';
+    } else {
+        crueltyFreeSection.style.display = 'none';
+    }
 }
 
 // Settings management functions

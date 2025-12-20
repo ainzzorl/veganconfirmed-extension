@@ -96,6 +96,7 @@ function saveToAnalysisHistory(url, analysisResult, timestamp, contentTitle = nu
             title: contentTitle || analysisResult.page_title || getPageTitleFromUrl(url) || 'Unknown Page',
             is_vegan: analysisResult.analysis?.is_vegan,
             is_shopping_item: analysisResult.analysis?.is_shopping_item,
+            is_cruelty_free: analysisResult.analysis?.is_cruelty_free,
             confidence_level: analysisResult.analysis?.confidence_level,
             summary: analysisResult.analysis?.summary?.substring(0, 100) + (analysisResult.analysis?.summary?.length > 100 ? '...' : ''),
             explanation: analysisResult.analysis?.explanation?.substring(0, 150) + (analysisResult.analysis?.explanation?.length > 150 ? '...' : ''),

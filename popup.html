@@ -388,6 +388,73 @@
             font-size: 13px;
             line-height: 1.4;
         }
+
+        /* Cruelty-free status styles */
+        .cruelty-free-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .cruelty-status {
+            font-size: 16px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 8px;
+        }
+
+        .cruelty-free {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
+        .not-cruelty-free {
+            background-color: #fce4ec;
+            color: #c2185b;
+            border: 1px solid #f48fb1;
+        }
+
+        .cruelty-unknown {
+            background-color: #fafafa;
+            color: #757575;
+            border: 1px solid #e0e0e0;
+        }
+
+        .cruelty-explanation {
+            background-color: #f5f5f5;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #555;
+        }
+
+        /* History cruelty-free status */
+        .history-cruelty-status {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        .history-cruelty-status.cruelty-free {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .history-cruelty-status.not-cruelty-free {
+            background-color: #fce4ec;
+            color: #c2185b;
+        }
+
+        .history-cruelty-status.cruelty-unknown {
+            background-color: #fafafa;
+            color: #757575;
+        }
     </style>
 </head>
 
@@ -416,6 +483,10 @@
             </div>
             <div class="section">
                 <div id="avoided-ingredients" style="display: none;"></div>
+            </div>
+            <div id="crueltyFreeSection" class="section cruelty-free-section" style="display: none;">
+                <div id="crueltyFreeStatus" class="cruelty-status"></div>
+                <div id="crueltyFreeExplanation" class="cruelty-explanation"></div>
             </div>
         </div>
     </div>
