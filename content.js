@@ -11,6 +11,24 @@ function log(...args) {
   }
 }
 
+// Determine the language of the page from the <html lang> attribute,
+// falling back to the content-language meta tag. Returns null if unknown.
+function getPageLanguage() {
+  const htmlLang = document.documentElement.getAttribute("lang");
+  if (htmlLang && htmlLang.trim()) {
+    return htmlLang.trim();
+  }
+
+  const metaLang = document.querySelector(
+    'meta[http-equiv="content-language" i]'
+  );
+  if (metaLang && metaLang.content && metaLang.content.trim()) {
+    return metaLang.content.trim();
+  }
+
+  return null;
+}
+
 // Function to clean up duplicate new lines in markdown
 function cleanMarkdown(markdown) {
   // Replace multiple consecutive new lines with maximum of 2
@@ -165,6 +183,7 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
     title: document.title,
     timestamp: new Date().toISOString(),
     content: markdownContent,
+    language: getPageLanguage(),
     trigger_type: triggerType,
     trigger_element_text: triggerElementText,
   };
