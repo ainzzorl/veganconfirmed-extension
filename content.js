@@ -46,9 +46,29 @@ function cleanMarkdown(markdown) {
   return cleaned;
 }
 
+// Heuristic: detect text nodes that are really an embedded JSON/JS data blob
+// (e.g. Amazon's `{"desktop_buybox_group_1":[...]}` pricing state that lives in
+// a plain <div> rather than a <script>, so element removal alone misses it).
+// Such blobs are pure noise for analysis and waste a large number of tokens.
+function looksLikeDataBlob(text) {
+  const trimmed = text.trim();
+  if (trimmed.length < 200) {
+    return false;
+  }
+  if (!/^[\[{]/.test(trimmed)) {
+    return false;
+  }
+  // Many quoted-key/colon pairs is a strong signal of serialized data.
+  const structuralPairs = (trimmed.match(/"\s*:/g) || []).length;
+  return structuralPairs >= 5;
+}
+
 // Function to convert HTML element to markdown
 function elementToMarkdown(element) {
   if (element.nodeType === Node.TEXT_NODE) {
+    if (looksLikeDataBlob(element.textContent)) {
+      return "";
+    }
     return element.textContent;
   }
 
@@ -146,15 +166,20 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
   // Clone the body to avoid modifying the original page
   const bodyClone = document.body.cloneNode(true);
 
-  // Remove script and style elements
+  // Remove script, style and other non-textual elements. `select`/`option`
+  // dropdowns are removed because they carry only size/variant lists (often many
+  // KB of pure noise on store pages); `svg`/`template`/`link` are decorative or
+  // non-rendered.
   const scripts = bodyClone.querySelectorAll(
-    "script, style, noscript, iframe, embed, object"
+    "script, style, noscript, iframe, embed, object, svg, select, option, template, link"
   );
   scripts.forEach((el) => el.remove());
 
-  // Remove common non-content elements
+  // Remove common non-content elements. `[aria-hidden="true"]` covers off-screen
+  // duplicate UI states (collapsed panels, feedback-survey alternates) that would
+  // otherwise be flattened into the text and bloat/dilute the analysis input.
   const nonContentElements = bodyClone.querySelectorAll(
-    "nav, footer, header, .sidebar, .navigation, .menu, .ad, .advertisement, .banner, #navFooter"
+    'nav, footer, header, .sidebar, .navigation, .menu, .ad, .advertisement, .banner, #navFooter, [aria-hidden="true"]'
   );
   nonContentElements.forEach((el) => el.remove());
 
@@ -165,6 +190,7 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
     "#leftCol",
     "#averageCustomerReviews",
     "#apex_desktop",
+    "#pqv-feedback",
     ".offersConsistencyEnabled",
     '[data-feature-name="sims-productBundle"]',
     '[data-feature-name="sims-simsContainer"]',
