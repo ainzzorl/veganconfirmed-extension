@@ -1,0 +1,12 @@
+{
+  "name": "veganconfirmed-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vegan Confirmed browser extension",
+  "scripts": {
+    "extract": "node tools/extract_content.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

@@ -420,16 +420,35 @@ function setupCartDetection() {
   log("Vegan Confirmed: Cart detection setup complete");
 }
 
-// Listen for messages from popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  log("Content script received message:", message);
+// Initialize content script only inside a real extension/browser context. Under
+// Node (e.g. the jsdom-based extraction harness used by the backend analysis
+// eval) `chrome` is undefined, so the load-time side effects are skipped and the
+// extraction functions can be imported without registering listeners or
+// observers.
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+  // Listen for messages from popup
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    log("Content script received message:", message);
 
-  if (message.type === "TRIGGER_ANALYSIS") {
-    triggerAnalysis();
-    sendResponse({ status: "analysis_triggered" });
-  }
-});
+    if (message.type === "TRIGGER_ANALYSIS") {
+      triggerAnalysis();
+      sendResponse({ status: "analysis_triggered" });
+    }
+  });
 
-// Initialize content script and setup cart detection
-log("Content script loaded - setting up cart detection");
-setupCartDetection();
+  // Initialize content script and setup cart detection
+  log("Content script loaded - setting up cart detection");
+  setupCartDetection();
+}
+
+// Expose the extraction helpers to Node-based tooling/tests (no-op in a browser,
+// where `module` is undefined). Keeps content.js the single source of truth for
+// the HTML→markdown extraction the backend analysis eval runs against.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    extractPageContent,
+    elementToMarkdown,
+    cleanMarkdown,
+    detectAddToCartButtons,
+  };
+}
