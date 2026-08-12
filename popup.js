@@ -8,6 +8,21 @@ function sanitizeHTML(text) {
     return div.innerHTML;
 }
 
+// Local testing mode, defined by DEV_MODE in background.js and asked for here
+// rather than duplicated. The popup reads cached analyses straight out of
+// storage to show a result the moment it opens, so it has to honour the same
+// cache bypass — otherwise a stale result would appear while testing even
+// though the background never serves one.
+function isDevMode() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_DEV_MODE' }, function (response) {
+            // On error (worker not up yet) assume normal mode: showing a cached
+            // result is the harmless direction to fail in.
+            resolve(!chrome.runtime.lastError && response && response.dev_mode === true);
+        });
+    });
+}
+
 // A Google Maps place page gets the menu flow instead of the single-item flow.
 function isMapsPlaceUrl(url) {
     return typeof url === 'string' &&
@@ -59,12 +74,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const analysisKey = `${currentTab.url}_analysis`;
 
-            chrome.storage.local.get([analysisKey], function (result) {
-                const analysisData = result[analysisKey];
-
-                if (analysisData && analysisData.analysis) {
-                    displayAnalysis(analysisData.analysis, false);
+            isDevMode().then(function (devMode) {
+                if (devMode) {
+                    return;
                 }
+
+                chrome.storage.local.get([analysisKey], function (result) {
+                    const analysisData = result[analysisKey];
+
+                    if (analysisData && analysisData.analysis) {
+                        displayAnalysis(analysisData.analysis, false);
+                    }
+                });
             });
         });
 
@@ -241,24 +262,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Must match the key background.js caches under.
             const cacheKey = `menu:${info.place_key}_analysis`;
-            chrome.storage.local.get([cacheKey], function (result) {
-                const cached = result[cacheKey];
-                if (!cached || !cached.analysis) {
+            isDevMode().then(function (devMode) {
+                if (devMode) {
                     return;
                 }
 
-                // Only show it if the entry demonstrably belongs to this place
-                // — the same check background.js makes. A Maps URL can carry
-                // several place ids, so a key alone is not proof of identity.
-                const cachedPlace = cached.cached_place;
-                if (!cachedPlace ||
-                    (cachedPlace.name && info.restaurant_name &&
-                        cachedPlace.name !== info.restaurant_name)) {
-                    console.log('Ignoring menu cache entry that does not match this place');
-                    return;
-                }
+                chrome.storage.local.get([cacheKey], function (result) {
+                    const cached = result[cacheKey];
+                    if (!cached || !cached.analysis) {
+                        return;
+                    }
 
-                displayMenuAnalysis(cached.analysis);
+                    // Only show it if the entry demonstrably belongs to this
+                    // place — the same check background.js makes. A Maps URL
+                    // can carry several place ids, so a key alone is not proof
+                    // of identity.
+                    const cachedPlace = cached.cached_place;
+                    if (!cachedPlace ||
+                        (cachedPlace.name && info.restaurant_name &&
+                            cachedPlace.name !== info.restaurant_name)) {
+                        console.log('Ignoring menu cache entry that does not match this place');
+                        return;
+                    }
+
+                    displayMenuAnalysis(cached.analysis);
+                });
             });
         });
     }

@@ -13,6 +13,25 @@ A browser extension that provides AI-powered vegan analysis of webpage content.
   `/api/analyze-menu`, which returns a vegan verdict per dish. Results are shown
   in the popup, grouped as vegan / likely vegan / unclear / not vegan.
 
+## Local testing mode
+
+Set `DEV_MODE = true` at the top of `background.js` to test against a backend
+running on this machine (`http://localhost:5555`, the backend's default port),
+then reload the extension. Set it back to `false` before packaging — it ships
+as `false`, so a normal build always talks to production.
+
+Caching is disabled along with the endpoint on purpose. Analyses are cached per
+URL (and per place, for menus) for 24 hours, so without it the first response
+for a page would be the only one the extension ever asks for — a prompt or
+backend change would appear to do nothing until the next day. In this mode
+nothing is read from or written to the cache; History is still recorded, and
+cache entries written in normal mode are left untouched.
+
+`background.js` is the only place the flag is defined. `popup.js` needs it too,
+because it reads cached analyses out of storage directly to show a result as
+soon as it opens, and it asks for the value over a `GET_DEV_MODE` message
+rather than keeping a second copy to forget to flip.
+
 ### Notes on the Google Maps integration
 
 - Maps' generated class names are unstable, so `maps.js` anchors on the

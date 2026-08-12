@@ -1,9 +1,24 @@
 // Add logging to verify script loading
 console.log('Background script loaded');
 
+// Local testing mode — flip to true while testing against a backend running on
+// this machine, and back to false before packaging.
+//
+// It does two things: requests go to LOCAL_BACKEND_URL, and analyses are
+// neither read from nor written to the cache. Without the second part a local
+// run is nearly untestable — the first response for a URL is the only one the
+// extension ever asks for, so a prompt or backend change appears to have no
+// effect for the next 24 hours.
+//
+// This is the single source of truth for the flag. popup.js needs it too (it
+// reads cached analyses directly) and asks for it over GET_DEV_MODE rather than
+// keeping a copy that could drift out of sync with this one.
+const DEV_MODE = false;
+
 // Backend API configuration
-//const BACKEND_URL = 'http://localhost:5555';
-const BACKEND_URL = 'https://api.veganconfirmed.com';
+const PROD_BACKEND_URL = 'https://api.veganconfirmed.com';
+const LOCAL_BACKEND_URL = 'http://localhost:5555';
+const BACKEND_URL = DEV_MODE ? LOCAL_BACKEND_URL : PROD_BACKEND_URL;
 
 // Cache configuration
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
@@ -53,6 +68,11 @@ function isCacheValid(timestamp) {
 
 // Function to get cached analysis result
 function getCachedAnalysis(url) {
+    if (DEV_MODE) {
+        console.log(`Cache BYPASSED (local testing mode) for URL: ${url}`);
+        return Promise.resolve(null);
+    }
+
     return new Promise((resolve) => {
         chrome.storage.local.get([`${url}_analysis`, `${url}_cache_timestamp`], (result) => {
             const analysis = result[`${url}_analysis`];
@@ -70,13 +90,22 @@ function getCachedAnalysis(url) {
 }
 
 // Function to store analysis result in cache
+//
+// In local testing mode the cache entry is skipped but history is still
+// written: history is a record of what was analyzed, not a source results are
+// served from, and it is useful while testing.
 function storeCachedAnalysis(url, analysisResult, contentTitle = null) {
     const timestamp = Date.now();
-    chrome.storage.local.set({
-        [`${url}_analysis`]: analysisResult,
-        [`${url}_cache_timestamp`]: timestamp
-    });
-    console.log(`Cached analysis result for URL: ${url}`);
+
+    if (DEV_MODE) {
+        console.log(`Not caching analysis (local testing mode) for URL: ${url}`);
+    } else {
+        chrome.storage.local.set({
+            [`${url}_analysis`]: analysisResult,
+            [`${url}_cache_timestamp`]: timestamp
+        });
+        console.log(`Cached analysis result for URL: ${url}`);
+    }
 
     // Also save to analysis history
     saveToAnalysisHistory(url, analysisResult, timestamp, contentTitle);
@@ -227,6 +256,7 @@ async function sendContentAnalysis(content) {
             user_avoided_ingredients: avoidedIngredients
         };
 
+        console.log(`Analyzing against ${BACKEND_URL}`);
         const response = await fetch(`${BACKEND_URL}/api/analyze`, {
             method: 'POST',
             headers: {
@@ -286,7 +316,9 @@ function menuCacheKey(placeKey) {
 function storeCachedMenuAnalysis(placeKey, analysisResult, payload) {
     const timestamp = Date.now();
 
-    if (placeKey) {
+    if (DEV_MODE) {
+        console.log(`Not caching menu analysis (local testing mode) for place: ${placeKey}`);
+    } else if (placeKey) {
         const cacheKey = menuCacheKey(placeKey);
         chrome.storage.local.set({
             [`${cacheKey}_analysis`]: {
@@ -372,6 +404,7 @@ async function sendMenuAnalysis(payload) {
             user_avoided_ingredients: avoidedIngredients
         };
 
+        console.log(`Analyzing menu against ${BACKEND_URL}`);
         const response = await fetch(`${BACKEND_URL}/api/analyze-menu`, {
             method: 'POST',
             headers: {
@@ -489,6 +522,12 @@ function cleanupExpiredCache() {
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Message received:', message);
+
+    // The popup asks for DEV_MODE so the flag stays defined in one place.
+    if (message.type === 'GET_DEV_MODE') {
+        sendResponse({ dev_mode: DEV_MODE });
+        return;
+    }
 
     if (message.type === 'CONTENT_FOR_ANALYSIS') {
         console.log('Received content for analysis:', message.content);
