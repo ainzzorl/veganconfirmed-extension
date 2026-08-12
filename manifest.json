@@ -36,6 +36,31 @@
       "css": [
         "content.css"
       ]
+    },
+    {
+      "matches": [
+        "*://www.google.com/maps/*",
+        "*://maps.google.com/*",
+        "*://www.google.co.uk/maps/*",
+        "*://www.google.ca/maps/*",
+        "*://www.google.com.au/maps/*",
+        "*://www.google.de/maps/*",
+        "*://www.google.fr/maps/*",
+        "*://www.google.es/maps/*",
+        "*://www.google.it/maps/*",
+        "*://www.google.nl/maps/*",
+        "*://www.google.pl/maps/*",
+        "*://www.google.se/maps/*",
+        "*://www.google.com.br/maps/*",
+        "*://www.google.co.in/maps/*",
+        "*://www.google.co.jp/maps/*"
+      ],
+      "js": [
+        "maps.js"
+      ],
+      "css": [
+        "maps.css"
+      ]
     }
   ],
   "background": {

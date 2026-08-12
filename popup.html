@@ -431,6 +431,134 @@
             color: #555;
         }
 
+        /* Menu analysis styles */
+        .menu-restaurant {
+            font-size: 17px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .friendliness-high {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .friendliness-medium {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
+        .friendliness-low {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            border: 1px solid #ffcc02;
+        }
+
+        .friendliness-none {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .menu-group {
+            margin-bottom: 14px;
+        }
+
+        .menu-group-title {
+            font-size: 13px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: #666;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .menu-item {
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            border-left: 4px solid #ccc;
+            background-color: #f9f9f9;
+        }
+
+        .menu-item.vegan {
+            border-left-color: #4CAF50;
+            background-color: #f1f8f2;
+        }
+
+        .menu-item.likely_vegan {
+            border-left-color: #8bc34a;
+            background-color: #f5f9ef;
+        }
+
+        .menu-item.unclear {
+            border-left-color: #ffb74d;
+            background-color: #fff8ec;
+        }
+
+        .menu-item.not_vegan {
+            border-left-color: #e57373;
+            background-color: #fdf3f3;
+        }
+
+        .menu-item-name {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .menu-item-section {
+            font-size: 11px;
+            color: #999;
+            margin-left: 6px;
+            font-weight: normal;
+        }
+
+        .menu-item-reason {
+            font-size: 12px;
+            color: #555;
+            line-height: 1.35;
+            margin-top: 3px;
+        }
+
+        .menu-item-tag {
+            display: inline-block;
+            margin-top: 5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .menu-item-tag.veganizable {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .menu-item-tag.avoided {
+            background-color: #fff3e0;
+            color: #e65100;
+            margin-left: 5px;
+        }
+
+        .menu-empty {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 16px;
+        }
+
+        /* History menu entries */
+        .history-status.menu {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
         /* History cruelty-free status */
         .history-cruelty-status {
             display: inline-block;
@@ -487,6 +615,19 @@
             <div id="crueltyFreeSection" class="section cruelty-free-section" style="display: none;">
                 <div id="crueltyFreeStatus" class="cruelty-status"></div>
                 <div id="crueltyFreeExplanation" class="cruelty-explanation"></div>
+            </div>
+        </div>
+        <div id="menu-content" style="display: none;">
+            <div class="section">
+                <div id="menuRestaurant" class="menu-restaurant"></div>
+                <div id="menuFriendliness" class="vegan-status"></div>
+                <div id="menuConfidence" class="confidence"></div>
+            </div>
+            <div class="section">
+                <div id="menuSummary" class="explanation"></div>
+            </div>
+            <div class="section">
+                <div id="menuItems"></div>
             </div>
         </div>
     </div>

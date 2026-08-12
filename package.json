@@ -4,7 +4,9 @@
   "private": true,
   "description": "Vegan Confirmed browser extension",
   "scripts": {
-    "extract": "node tools/extract_content.js"
+    "extract": "node tools/extract_content.js",
+    "check": "node tools/check_content_scripts.js",
+    "test": "node tools/check_content_scripts.js && node tools/check_place_key.js"
   },
   "devDependencies": {
     "jsdom": "^24.1.0"

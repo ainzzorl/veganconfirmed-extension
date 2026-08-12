@@ -1,0 +1,65 @@
+/* Vegan Confirmed — Google Maps menu trigger chip.
+   Kept separate from content.css, which is injected on every page. */
+
+.vegan-menu-chip {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999999;
+
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 90vw;
+    padding: 10px 18px;
+
+    background: #4CAF50;
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.vegan-menu-chip:hover:not(:disabled) {
+    background: #45a049;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.vegan-menu-chip:disabled {
+    cursor: default;
+    opacity: 0.85;
+}
+
+.vegan-menu-chip.loading {
+    background: #2196F3;
+}
+
+.vegan-menu-chip.done {
+    background: #2e7d32;
+}
+
+.vegan-menu-chip.error {
+    background: #f44336;
+}
+
+/* Maps puts its own controls along the bottom edge on narrow viewports;
+   sit above them rather than on top of them. */
+@media (max-width: 600px) {
+    .vegan-menu-chip {
+        bottom: 84px;
+        font-size: 13px;
+        padding: 9px 16px;
+    }
+}

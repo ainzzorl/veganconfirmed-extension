@@ -8,11 +8,25 @@ function sanitizeHTML(text) {
     return div.innerHTML;
 }
 
+// A Google Maps place page gets the menu flow instead of the single-item flow.
+function isMapsPlaceUrl(url) {
+    return typeof url === 'string' &&
+        /:\/\/[^/]*google\.[^/]+\//.test(url) &&
+        url.includes('/maps/place/');
+}
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', function () {
     const analyzeButton = document.getElementById('analyzeButton');
     const loadingDiv = document.getElementById('loading');
     const contentDiv = document.getElementById('content');
+
+    // Whether the active tab is a restaurant on Google Maps. Set during
+    // startup and consulted by the analyze button and the reset helper.
+    let menuMode = false;
+
+    const ITEM_BUTTON_LABEL = '\u{1F331} Check if the product is vegan';
+    const MENU_BUTTON_LABEL = '\u{1F331} Check this menu';
 
     // Establish connection to background script for popup close detection
     const port = chrome.runtime.connect({ name: 'popup' });
@@ -36,8 +50,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // If no non-vegan analysis, check for regular analysis results for this page
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            const currentUrl = tabs[0].url;
-            const analysisKey = `${currentUrl}_analysis`;
+            const currentTab = tabs[0];
+
+            if (isMapsPlaceUrl(currentTab.url)) {
+                setupMenuMode(currentTab);
+                return;
+            }
+
+            const analysisKey = `${currentTab.url}_analysis`;
 
             chrome.storage.local.get([analysisKey], function (result) {
                 const analysisData = result[analysisKey];
@@ -122,6 +142,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 let statusText = 'Unknown';
                 let statusClass = 'unknown';
 
+                // Menu entries (type: 'menu') summarise a whole restaurant.
+                // Entries written before menu support existed have no `type`.
+                if (item.type === 'menu') {
+                    const veganTotal = (item.vegan_count || 0) + (item.likely_vegan_count || 0);
+                    statusClass = 'menu';
+                    statusText = item.is_restaurant_menu === false
+                        ? '\u{1F374} No menu found'
+                        : `\u{1F374} ${veganTotal} of ${item.item_count || 0} dishes vegan`;
+
+                    return `
+                        <div class="history-item" data-url="${sanitizeHTML(item.url)}">
+                            <div class="history-title">${sanitizeHTML(item.title)}</div>
+                            <div class="history-date">${sanitizeHTML(item.date)}</div>
+                            <div class="history-status ${statusClass}">${sanitizeHTML(statusText)}</div>
+                            ${item.confidence_level ? `<div class="history-confidence">Confidence: ${sanitizeHTML(item.confidence_level.toUpperCase())}</div>` : ''}
+                            ${item.summary ? `<div class="history-summary">${sanitizeHTML(item.summary)}</div>` : ''}
+                        </div>
+                    `;
+                }
+
                 if (item.is_shopping_item === false) {
                     statusText = 'Not Shopping Item';
                     statusClass = 'not-shopping';
@@ -184,12 +224,56 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Switch the popup to the Google Maps menu flow and show a cached result
+    // for this restaurant if we have one.
+    function setupMenuMode(tab) {
+        menuMode = true;
+        analyzeButton.textContent = MENU_BUTTON_LABEL;
+
+        chrome.tabs.sendMessage(tab.id, { type: 'GET_PLACE_INFO' }, function (info) {
+            if (chrome.runtime.lastError || !info || !info.place_key) {
+                // Content script not yet injected (e.g. the tab was open before
+                // the extension was installed or reloaded). The button still
+                // works once the page is refreshed.
+                console.log('No place info available for this tab');
+                return;
+            }
+
+            // Must match the key background.js caches under.
+            const cacheKey = `menu:${info.place_key}_analysis`;
+            chrome.storage.local.get([cacheKey], function (result) {
+                const cached = result[cacheKey];
+                if (!cached || !cached.analysis) {
+                    return;
+                }
+
+                // Only show it if the entry demonstrably belongs to this place
+                // — the same check background.js makes. A Maps URL can carry
+                // several place ids, so a key alone is not proof of identity.
+                const cachedPlace = cached.cached_place;
+                if (!cachedPlace ||
+                    (cachedPlace.name && info.restaurant_name &&
+                        cachedPlace.name !== info.restaurant_name)) {
+                    console.log('Ignoring menu cache entry that does not match this place');
+                    return;
+                }
+
+                displayMenuAnalysis(cached.analysis);
+            });
+        });
+    }
+
     function triggerAnalysis() {
         // Disable button and show loading
         analyzeButton.disabled = true;
         analyzeButton.textContent = 'Analyzing...';
         loadingDiv.style.display = 'block';
+        loadingDiv.className = 'loading';
+        loadingDiv.textContent = menuMode
+            ? 'Reading the menu…'
+            : 'Analyzing page content...';
         contentDiv.style.display = 'none';
+        document.getElementById('menu-content').style.display = 'none';
 
         // Get current tab and trigger content extraction
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
@@ -197,7 +281,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Send message to content script to extract and analyze content
             chrome.tabs.sendMessage(currentTab.id, {
-                type: 'TRIGGER_ANALYSIS'
+                type: menuMode ? 'TRIGGER_MENU_ANALYSIS' : 'TRIGGER_ANALYSIS'
             }, function (response) {
                 if (chrome.runtime.lastError) {
                     console.error('Error sending message to content script:', chrome.runtime.lastError);
@@ -209,13 +293,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Analysis is now triggered, results will come via message
                 console.log('Analysis triggered successfully');
 
-                // Set a timeout in case the analysis takes too long
+                // Set a timeout in case the analysis takes too long. Menus are
+                // slower: the page has to be scrolled to load every dish, and
+                // the model writes a verdict per dish rather than one verdict.
+                const timeoutMs = menuMode ? 120000 : 30000;
                 setTimeout(function () {
                     if (loadingDiv.style.display !== 'none') {
                         displayError('Analysis timed out. Please try again.');
                         resetButton();
                     }
-                }, 30000); // 30 second timeout
+                }, timeoutMs);
             });
         });
     }
@@ -234,19 +321,32 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log('Received analysis error:', message.error);
             displayError(message.error || 'Analysis failed. Please try again.');
             resetButton();
+        } else if (message.type === 'MENU_RESULT_FOR_POPUP') {
+            console.log('Received menu analysis result:', message.result);
+            if (message.result && message.result.analysis) {
+                displayMenuAnalysis(message.result.analysis);
+                resetButton();
+                loadAnalysisHistory();
+            }
+        } else if (message.type === 'MENU_ERROR_FOR_POPUP') {
+            console.log('Received menu analysis error:', message.error);
+            displayError(message.error || 'Menu analysis failed. Please try again.');
+            resetButton();
         }
     });
 
     function resetButton() {
         analyzeButton.disabled = false;
-        analyzeButton.textContent = '\u{1F331} Check if the product is vegan';
+        analyzeButton.textContent = menuMode ? MENU_BUTTON_LABEL : ITEM_BUTTON_LABEL;
         loadingDiv.style.display = 'none';
     }
 
     function displayError(message) {
         loadingDiv.textContent = message;
         loadingDiv.className = 'loading error';
+        loadingDiv.style.display = 'block';
         contentDiv.style.display = 'none';
+        document.getElementById('menu-content').style.display = 'none';
     }
 });
 
@@ -384,6 +484,108 @@ function displayAnalysis(analysis, isWarningAnalysis = false) {
     } else {
         crueltyFreeSection.style.display = 'none';
     }
+}
+
+// Dish groups, in the order a vegan diner cares about them.
+const MENU_VERDICT_GROUPS = [
+    { verdict: 'vegan', label: '\u{1F331} Vegan' },
+    { verdict: 'likely_vegan', label: '\u{1F33F} Likely vegan' },
+    { verdict: 'unclear', label: '\u{2753} Unclear — ask the staff' },
+    { verdict: 'not_vegan', label: '\u{26A0}\u{FE0F} Not vegan' }
+];
+
+const FRIENDLINESS_TEXT = {
+    high: '\u{1F331} Plenty of vegan options',
+    medium: '\u{1F33F} Some vegan options',
+    low: '\u{26A0}\u{FE0F} Very limited vegan options',
+    none: '\u{26D4} No vegan options found'
+};
+
+function displayMenuAnalysis(analysis) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'none';
+
+    const menuContent = document.getElementById('menu-content');
+    menuContent.style.display = 'block';
+
+    document.getElementById('menuRestaurant').textContent =
+        analysis.restaurant_name || 'This restaurant';
+
+    const friendlinessElement = document.getElementById('menuFriendliness');
+    const confidenceElement = document.getElementById('menuConfidence');
+    const summaryElement = document.getElementById('menuSummary');
+    const itemsElement = document.getElementById('menuItems');
+
+    // No menu on the page is a normal outcome on Maps, not an error: many
+    // restaurants only link out to a menu or show photos of one.
+    if (analysis.is_restaurant_menu === false) {
+        friendlinessElement.textContent = '\u{1F937} No menu found on this page';
+        friendlinessElement.className = 'vegan-status unknown';
+        confidenceElement.textContent = '';
+        summaryElement.textContent = analysis.summary ||
+            'Google Maps does not show a menu for this restaurant.';
+        itemsElement.innerHTML = '';
+        return;
+    }
+
+    const friendliness = analysis.vegan_friendliness || 'none';
+    friendlinessElement.textContent =
+        FRIENDLINESS_TEXT[friendliness] || FRIENDLINESS_TEXT.none;
+    friendlinessElement.className = `vegan-status friendliness-${friendliness}`;
+
+    confidenceElement.textContent = analysis.confidence_level
+        ? `Confidence: ${analysis.confidence_level.toUpperCase()}`
+        : '';
+
+    summaryElement.textContent = analysis.summary || 'No summary available';
+
+    const items = analysis.items || [];
+    if (items.length === 0) {
+        itemsElement.innerHTML =
+            '<div class="menu-empty">No dishes could be read from this menu.</div>';
+        return;
+    }
+
+    itemsElement.innerHTML = MENU_VERDICT_GROUPS.map(group => {
+        const groupItems = items.filter(item => item.verdict === group.verdict);
+        if (groupItems.length === 0) {
+            return '';
+        }
+
+        const rows = groupItems.map(item => {
+            const section = item.section
+                ? `<span class="menu-item-section">${sanitizeHTML(item.section)}</span>`
+                : '';
+
+            // Only worth surfacing on dishes that are not already vegan.
+            const veganizable = (item.veganizable === true && item.verdict !== 'vegan')
+                ? '<span class="menu-item-tag veganizable">Can be made vegan</span>'
+                : '';
+
+            const avoided = (item.user_avoided_ingredients && item.user_avoided_ingredients.length > 0)
+                ? `<span class="menu-item-tag avoided">\u{26A0}\u{FE0F} ${sanitizeHTML(item.user_avoided_ingredients.join(', '))}</span>`
+                : '';
+
+            const reason = item.reason
+                ? `<div class="menu-item-reason">${sanitizeHTML(item.reason)}</div>`
+                : '';
+
+            return `
+                <div class="menu-item ${group.verdict}">
+                    <div class="menu-item-name">${sanitizeHTML(item.name)}${section}</div>
+                    ${reason}
+                    ${veganizable}${avoided}
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="menu-group">
+                <div class="menu-group-title">${group.label} (${groupItems.length})</div>
+                ${rows}
+            </div>
+        `;
+    }).join('');
 }
 
 // Settings management functions

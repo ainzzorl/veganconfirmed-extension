@@ -462,9 +462,17 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
     }
   });
 
-  // Initialize content script and setup cart detection
-  log("Content script loaded - setting up cart detection");
-  setupCartDetection();
+  // Google Maps is handled by maps.js (menu analysis). Cart detection is not
+  // just useless there but actively costly: Maps mutates the DOM continuously
+  // while the map pans, and every mutation would re-run a whole-document
+  // button scan.
+  if (/\/maps\//.test(window.location.pathname)) {
+    log("Google Maps detected - skipping cart detection (maps.js handles this page)");
+  } else {
+    // Initialize content script and setup cart detection
+    log("Content script loaded - setting up cart detection");
+    setupCartDetection();
+  }
 }
 
 // Expose the extraction helpers to Node-based tooling/tests (no-op in a browser,

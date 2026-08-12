@@ -118,6 +118,48 @@ function saveToAnalysisHistory(url, analysisResult, timestamp, contentTitle = nu
     });
 }
 
+// Function to save a menu analysis to history
+//
+// Menu entries share the history list with single-item entries but carry
+// `type: 'menu'`; entries written before menu support existed have no `type`
+// and are treated as items.
+function saveMenuToAnalysisHistory(placeKey, analysisResult, timestamp, payload) {
+    chrome.storage.local.get(['analysis_history'], function (result) {
+        const history = result.analysis_history || [];
+        const analysis = analysisResult.analysis || {};
+        const items = analysis.items || [];
+
+        const countOf = (verdict) => items.filter(item => item.verdict === verdict).length;
+
+        const historyEntry = {
+            id: `${placeKey}_${timestamp}`,
+            type: 'menu',
+            url: payload.url,
+            place_key: placeKey,
+            timestamp: timestamp,
+            date: new Date(timestamp).toLocaleString(),
+            title: analysis.restaurant_name || payload.restaurant_name || 'Restaurant',
+            is_restaurant_menu: analysis.is_restaurant_menu,
+            item_count: items.length,
+            vegan_count: countOf('vegan'),
+            likely_vegan_count: countOf('likely_vegan'),
+            vegan_friendliness: analysis.vegan_friendliness,
+            confidence_level: analysis.confidence_level,
+            summary: analysis.summary?.substring(0, 150) + (analysis.summary?.length > 150 ? '...' : '')
+        };
+
+        history.unshift(historyEntry);
+
+        if (history.length > 50) {
+            history.splice(50);
+        }
+
+        chrome.storage.local.set({ 'analysis_history': history }, function () {
+            console.log(`Saved menu analysis to history. Total entries: ${history.length}`);
+        });
+    });
+}
+
 // Function to get page title from URL (fallback)
 function getPageTitleFromUrl(url) {
     try {
@@ -226,6 +268,158 @@ async function sendContentAnalysis(content) {
     }
 }
 
+// Menu analyses are cached per *place*, not per URL: a Google Maps URL carries
+// the map viewport (`@lat,lng,zoom`) and a `data=` blob that both change as the
+// user pans, so the same restaurant is never seen at the same URL twice.
+function menuCacheKey(placeKey) {
+    return `menu:${placeKey}`;
+}
+
+// Function to store a menu analysis in cache (and history)
+//
+// The place the analysis was built for is recorded *inside* the cached value so
+// a reader can verify the entry really belongs to the place on screen. A Maps
+// URL can carry several place ids (see FTID_RE in maps.js), and mis-keying one
+// restaurant's menu onto another is both easy to do and invisible without this
+// check. Storing it inside the value rather than as a sibling key also keeps
+// cleanupExpiredCache's two-key assumption intact.
+function storeCachedMenuAnalysis(placeKey, analysisResult, payload) {
+    const timestamp = Date.now();
+
+    if (placeKey) {
+        const cacheKey = menuCacheKey(placeKey);
+        chrome.storage.local.set({
+            [`${cacheKey}_analysis`]: {
+                ...analysisResult,
+                cached_place: {
+                    key: placeKey,
+                    name: payload.restaurant_name,
+                    url: payload.url
+                }
+            },
+            [`${cacheKey}_cache_timestamp`]: timestamp
+        });
+        console.log(`Cached menu analysis for place: ${placeKey} (${payload.restaurant_name})`);
+    }
+
+    saveMenuToAnalysisHistory(placeKey, analysisResult, timestamp, payload);
+}
+
+// Return a cached menu analysis only if it demonstrably belongs to this place.
+//
+// Entries written before `cached_place` existed are discarded: they came from a
+// version that could key one restaurant's analysis under another's id, so they
+// cannot be trusted.
+function getCachedMenuAnalysis(payload) {
+    return new Promise(async (resolve) => {
+        if (!payload.place_id) {
+            resolve(null);
+            return;
+        }
+
+        const cached = await getCachedAnalysis(menuCacheKey(payload.place_id));
+        if (!cached) {
+            resolve(null);
+            return;
+        }
+
+        const cachedPlace = cached.cached_place;
+        if (!cachedPlace) {
+            console.warn('Discarding menu cache entry with no place record (written by an older version)');
+            resolve(null);
+            return;
+        }
+
+        if (cachedPlace.name && payload.restaurant_name &&
+            cachedPlace.name !== payload.restaurant_name) {
+            console.warn(
+                `Menu cache key collision: entry under ${payload.place_id} is for ` +
+                `"${cachedPlace.name}" but this page is "${payload.restaurant_name}". Re-analyzing.`
+            );
+            resolve(null);
+            return;
+        }
+
+        resolve(cached);
+    });
+}
+
+// Function to send a restaurant menu to the backend for analysis
+async function sendMenuAnalysis(payload) {
+    try {
+        console.log('Sending menu for AI analysis:', payload.restaurant_name, payload.url);
+
+        // Check cache first (only possible when we resolved a stable place key)
+        const cachedResult = await getCachedMenuAnalysis(payload);
+        if (cachedResult) {
+            console.log(
+                `Using cached menu analysis for "${cachedResult.cached_place.name}" ` +
+                `(${cachedResult.analysis?.items?.length || 0} dishes)`
+            );
+            setMenuBadge(cachedResult.analysis);
+            return cachedResult;
+        }
+
+        // Get user's avoided ingredients from storage
+        const avoidedIngredients = await new Promise((resolve) => {
+            chrome.storage.local.get(['custom_ingredients'], function (result) {
+                resolve(result.custom_ingredients || []);
+            });
+        });
+
+        const payloadWithSettings = {
+            ...payload,
+            user_avoided_ingredients: avoidedIngredients
+        };
+
+        const response = await fetch(`${BACKEND_URL}/api/analyze-menu`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payloadWithSettings)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const analysisResult = await response.json();
+        console.log('Menu analysis result:', analysisResult);
+
+        storeCachedMenuAnalysis(payload.place_id, analysisResult, payload);
+        setMenuBadge(analysisResult.analysis);
+
+        return analysisResult;
+    } catch (error) {
+        console.error('Error sending menu for analysis:', error);
+        return null;
+    }
+}
+
+// Badge the toolbar icon with the number of vegan dishes found. Unlike the
+// non-vegan product warning this is informational, so it does not force the
+// popup open or raise a notification.
+function setMenuBadge(analysis) {
+    const items = (analysis && analysis.items) || [];
+    const veganCount = items.filter(item =>
+        item.verdict === 'vegan' || item.verdict === 'likely_vegan'
+    ).length;
+
+    const action = chrome.action || chrome.browserAction;
+    if (!action) {
+        return;
+    }
+
+    if (veganCount > 0) {
+        action.setBadgeText({ text: String(veganCount) });
+        action.setBadgeBackgroundColor({ color: '#4CAF50' });
+    } else {
+        action.setBadgeText({ text: '0' });
+        action.setBadgeBackgroundColor({ color: '#ff9800' });
+    }
+}
+
 // Function to trigger warning popup for non-vegan items or items with avoided ingredients
 function triggerWarningPopup(analysis, type = 'non_vegan') {
     console.log(`Triggering ${type} popup for analysis:`, analysis);
@@ -322,6 +516,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     console.log('Could not send error to popup:', error);
                 });
             }
+        });
+    }
+
+    if (message.type === 'MENU_FOR_ANALYSIS') {
+        console.log('Received menu for analysis:', message.payload?.restaurant_name);
+
+        const tabId = sender.tab?.id;
+
+        sendMenuAnalysis(message.payload).then(result => {
+            // The chip lives in the content script, so the originating tab is
+            // told the outcome as well as the popup.
+            const tabMessage = result
+                ? { type: 'MENU_ANALYSIS_DONE', result: result }
+                : { type: 'MENU_ANALYSIS_FAILED' };
+
+            if (tabId !== undefined) {
+                chrome.tabs.sendMessage(tabId, tabMessage).catch(error => {
+                    console.log('Could not send menu result to tab:', error);
+                });
+            }
+
+            chrome.runtime.sendMessage(
+                result
+                    ? { type: 'MENU_RESULT_FOR_POPUP', result: result }
+                    : { type: 'MENU_ERROR_FOR_POPUP', error: 'Menu analysis failed or timed out' }
+            ).catch(error => {
+                console.log('Could not send menu result to popup:', error);
+            });
+        });
+    }
+
+    if (message.type === 'MENU_EXTRACTION_FAILED') {
+        console.log('Menu extraction failed:', message.error);
+
+        chrome.runtime.sendMessage({
+            type: 'MENU_ERROR_FOR_POPUP',
+            error: message.error || 'Could not read the menu on this page'
+        }).catch(error => {
+            console.log('Could not send menu error to popup:', error);
         });
     }
 
