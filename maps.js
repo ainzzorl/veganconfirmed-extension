@@ -5,7 +5,8 @@
 // as little DOM interpretation as possible. It only:
 //   1. recognises that a place page is open and identifies it stably,
 //   2. gets the menu actually rendered into the panel (activate the Menu tab,
-//      scroll to force lazy-loaded content in),
+//      click through the sub-tabs a menu is split across, scroll to force
+//      lazy-loaded content in),
 //   3. hands the panel's *visible* text to the backend.
 // Turning that text into structured dishes is the model's job (see the
 // backend's services/menu_prompt.py), which keeps this file resilient to Maps'
@@ -75,6 +76,15 @@
   // Keep in step with MENU_CONTENT_CHAR_LIMIT in the backend's menu_prompt.py.
   // Trimming here saves sending text the backend would only discard.
   const MAX_CONTENT_CHARS = 20000;
+
+  // A place's menu is frequently split across several sub-tabs — "Lunch",
+  // "Dinner", "Drinks", a separate bar menu — and Maps renders only the
+  // selected one. Reading the panel as found therefore judged a restaurant on
+  // whichever sub-tab happened to be open, so all of them are swept. These caps
+  // stop a place with a dozen menus from turning one click into minutes of
+  // clicking and scrolling; a menu that hits them is truncated, not abandoned.
+  const MAX_MENU_SECTIONS = 10;
+  const MENU_SECTION_BUDGET_MS = 45000;
 
   // Lines that are pure Maps chrome. Dropped to keep the payload focused; the
   // backend prompt tolerates leftovers, so this is an optimization, not a
@@ -218,22 +228,111 @@
     return null;
   }
 
+  // Returns the Menu tab element (so the sweep below can tell the place's own
+  // tab row apart from the menu's), or null when the place has no Menu tab.
   async function activateMenuTab(panel) {
     const tab = findMenuTab(panel);
     if (!tab) {
       log("no menu tab found; analyzing the panel as shown");
-      return false;
+      return null;
     }
 
     if (tab.getAttribute("aria-selected") === "true") {
       log("menu tab already active");
-      return true;
+      return tab;
     }
 
     log("activating menu tab");
     tab.click();
     await waitForSettle(panel, { quietMs: 500, timeoutMs: 6000 });
+    return tab;
+  }
+
+  // --- menu sub-tabs -------------------------------------------------------
+
+  // Maps builds "show one of these N views" as either a tablist or a chip row
+  // of radios — it uses the latter for review topics — and which one a given
+  // menu gets is not something to rely on. Accepting both roles means Maps
+  // switching from one to the other costs nothing here.
+  const SWITCHER_SELECTOR = '[role="tablist"], [role="radiogroup"]';
+  const SWITCHER_OPTION_SELECTOR = '[role="tab"], [role="radio"]';
+
+  // Maps keeps the sub-tabs you are not looking at in the DOM, so an option is
+  // only worth clicking if it is actually on screen. This walks to the root
+  // rather than reading `offsetParent` or `getClientRects` deliberately: those
+  // need layout, which jsdom (the Node test harness) does not have, and there
+  // they report *every* element as hidden. Only an explicit hide counts, so an
+  // unfamiliar way of hiding something costs us a redundant click, never a
+  // dropped menu.
+  function isRendered(element) {
+    let node = element;
+    while (node && node.nodeType === Node.ELEMENT_NODE) {
+      if (node.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
+      const style = window.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden") {
+        return false;
+      }
+      node = node.parentElement;
+    }
     return true;
+  }
+
+  function isOptionSelected(option) {
+    return (
+      option.getAttribute("aria-selected") === "true" ||
+      option.getAttribute("aria-checked") === "true"
+    );
+  }
+
+  function optionLabel(option) {
+    const text = (option.textContent || "").trim();
+    return text || (option.getAttribute("aria-label") || "").trim();
+  }
+
+  // The container an option renders into, when Maps wires `aria-controls` up.
+  // Reading just that container would keep the place's header, hours and
+  // reviews from being repeated once per section — but as of writing Maps uses
+  // neither `aria-controls` nor `role="tabpanel"` anywhere in the place panel,
+  // so in practice this returns null and the whole panel is read instead (which
+  // joinSections is built to cope with). It stays because it costs four lines
+  // and is the standard markup for exactly this.
+  function findControlledRegion(option) {
+    const id = option.getAttribute("aria-controls");
+    return (id && document.getElementById(id)) || null;
+  }
+
+  // The sub-tabs *within* the menu. Unrelated groups elsewhere in the panel —
+  // the review topic chips especially — are kept out by scoping to the region
+  // the Menu tab controls and by only ever calling this once that tab is open.
+  function findMenuSectionOptions(panel, menuTab) {
+    const scope = findControlledRegion(menuTab) || panel;
+
+    for (const switcher of scope.querySelectorAll(SWITCHER_SELECTOR)) {
+      // Any group holding the Menu tab itself is the place's own row: clicking
+      // through it would walk off the menu into Overview and Reviews.
+      if (switcher.contains(menuTab) || !isRendered(switcher)) {
+        continue;
+      }
+      const options = Array.from(
+        switcher.querySelectorAll(SWITCHER_OPTION_SELECTOR)
+      ).filter(isRendered);
+      // One option is not a choice — nothing is hidden behind it.
+      if (options.length > 1) {
+        return options;
+      }
+    }
+
+    return [];
+  }
+
+  async function activateSection(panel, option) {
+    if (isOptionSelected(option)) {
+      return;
+    }
+    option.click();
+    await waitForSettle(panel, { quietMs: 400, timeoutMs: 4000 });
   }
 
   // Menu items are lazy-loaded as the panel scrolls, so page to the bottom until
@@ -322,17 +421,168 @@
     return lines.join("\n").slice(0, MAX_CONTENT_CHARS);
   }
 
-  async function extractMenu() {
+  // Unless Maps gave a section a container of its own, each one is read from the
+  // whole panel, so every section repeats the place's header and footer verbatim
+  // with only the dishes in between differing. The lines that *every* section
+  // shares at each end are exactly that chrome, so they are emitted once around
+  // the sections instead of once per section.
+  //
+  // Comparing across all sections rather than trimming each against the first is
+  // what makes this safe: two menus that happen to end with the same dish keep
+  // it on both, because a third menu that does not end with it stops the match
+  // there. Nothing is ever dropped — a line only disappears from a section when
+  // it appears in the shared prefix or suffix, which are still emitted.
+  function splitSharedEdges(texts) {
+    const lists = texts.map((text) => text.split("\n"));
+    const shortest = Math.min(...lists.map((lines) => lines.length));
+
+    let prefix = 0;
+    while (
+      prefix < shortest &&
+      lists.every((lines) => lines[prefix] === lists[0][prefix])
+    ) {
+      prefix += 1;
+    }
+
+    // Bounded by what the prefix already claimed, so no line is emitted twice.
+    let suffix = 0;
+    while (
+      suffix < shortest - prefix &&
+      lists.every(
+        (lines) =>
+          lines[lines.length - 1 - suffix] ===
+          lists[0][lists[0].length - 1 - suffix]
+      )
+    ) {
+      suffix += 1;
+    }
+
+    return {
+      prefix: lists[0].slice(0, prefix),
+      suffix: suffix > 0 ? lists[0].slice(lists[0].length - suffix) : [],
+      middles: lists.map((lines) => lines.slice(prefix, lines.length - suffix)),
+    };
+  }
+
+  function joinSections(sections) {
+    if (sections.length === 0) {
+      return "";
+    }
+
+    // With one section there is no repetition to collapse, and every line is
+    // "shared", so the comparison above would empty it out.
+    if (sections.length === 1) {
+      const { name, text } = sections[0];
+      return (name ? `## ${name}\n${text}` : text).slice(0, MAX_CONTENT_CHARS);
+    }
+
+    const { prefix, suffix, middles } = splitSharedEdges(
+      sections.map((section) => section.text)
+    );
+
+    // A section whose middle is empty changed nothing on screen; its name is
+    // still worth emitting, as it tells the model that menu exists.
+    const blocks = sections.map(({ name }, index) =>
+      (name ? [`## ${name}`] : []).concat(middles[index]).join("\n")
+    );
+
+    return [prefix.join("\n"), blocks.join("\n\n"), suffix.join("\n")]
+      .filter((part) => part.trim())
+      .join("\n\n")
+      .slice(0, MAX_CONTENT_CHARS);
+  }
+
+  // Activating a tab rebuilds the panel rather than hiding the old one — clicking
+  // the place's About tab replaces the whole region, h1 and all — so an element
+  // captured before a click can be detached by the time the sweep comes back to
+  // it, and clicking a detached node does nothing at all. Everything is
+  // therefore re-resolved by position on every pass rather than held across one.
+  function resolveSections(panel) {
+    const livePanel = panel && panel.isConnected ? panel : findPlacePanel();
+    if (!livePanel) {
+      return { panel: null, options: [] };
+    }
+
+    const menuTab = findMenuTab(livePanel);
+    return {
+      panel: livePanel,
+      options: menuTab ? findMenuSectionOptions(livePanel, menuTab) : [],
+    };
+  }
+
+  async function extractMenuSections(panel, menuTab, onProgress) {
+    const options = menuTab ? findMenuSectionOptions(panel, menuTab) : [];
+
+    if (options.length === 0) {
+      await scrollToLoad(panel);
+      return { content: extractPanelText(panel), sections: [] };
+    }
+
+    log(`menu split across ${options.length} sections`, options.map(optionLabel));
+
+    const total = Math.min(options.length, MAX_MENU_SECTIONS);
+    // By position, for the same reason: the element itself will not survive.
+    const restoreTo = options.findIndex(isOptionSelected);
+    const deadline = Date.now() + MENU_SECTION_BUDGET_MS;
+    const sections = [];
+    let activePanel = panel;
+    let collectedChars = 0;
+
+    for (let index = 0; index < total; index += 1) {
+      const live = resolveSections(activePanel);
+      const option = live.options[index];
+      if (!option) {
+        log("the sub-tabs changed under us; keeping what was read so far");
+        break;
+      }
+      activePanel = live.panel;
+
+      if (onProgress) {
+        onProgress(index + 1, total);
+      }
+
+      await activateSection(activePanel, option);
+      await scrollToLoad(activePanel);
+
+      const text = extractPanelText(findControlledRegion(option) || activePanel);
+      sections.push({ name: optionLabel(option), text: text });
+      collectedChars += text.length;
+
+      if (Date.now() > deadline || collectedChars >= MAX_CONTENT_CHARS) {
+        log("stopping the section sweep early: budget reached");
+        break;
+      }
+    }
+
+    // Leave the panel on the sub-tab the user had open, the same way
+    // scrollToLoad puts their scroll position back.
+    if (restoreTo >= 0) {
+      const live = resolveSections(activePanel);
+      if (live.options[restoreTo]) {
+        await activateSection(live.panel, live.options[restoreTo]);
+      }
+    }
+
+    return {
+      content: joinSections(sections),
+      sections: sections.map((section) => section.name),
+    };
+  }
+
+  async function extractMenu(onProgress) {
     const panel = findPlacePanel();
     if (!panel) {
       throw new Error("Could not find the place panel on this page.");
     }
 
     const restaurantName = getPlaceName(panel);
-    const sawMenuTab = await activateMenuTab(panel);
-    await scrollToLoad(panel);
+    const menuTab = await activateMenuTab(panel);
+    const { content, sections } = await extractMenuSections(
+      panel,
+      menuTab,
+      onProgress
+    );
 
-    const content = extractPanelText(panel);
     if (!content) {
       throw new Error("Could not read any text from the place panel.");
     }
@@ -343,7 +593,8 @@
       content: content,
       timestamp: new Date().toISOString(),
       place_id: getPlaceKey(),
-      source: sawMenuTab ? "google_maps_menu_tab" : "google_maps_panel",
+      source: menuTab ? "google_maps_menu_tab" : "google_maps_panel",
+      menu_sections: sections,
       language: document.documentElement.getAttribute("lang") || null,
     };
   }
@@ -404,7 +655,11 @@
     setChipState("loading");
 
     try {
-      const payload = await extractMenu();
+      // Sweeping a split menu makes the panel visibly flip through its sub-tabs,
+      // which looks like a glitch unless the chip says what is going on.
+      const payload = await extractMenu((done, total) => {
+        setChipState("loading", `Analyzing menu… ${done}/${total}`);
+      });
       log("extracted menu payload", payload);
       chrome.runtime.sendMessage({ type: "MENU_FOR_ANALYSIS", payload: payload });
       return { status: "analysis_triggered" };
@@ -527,6 +782,10 @@
       extractPanelText,
       findPlacePanel,
       findMenuTab,
+      findMenuSectionOptions,
+      splitSharedEdges,
+      joinSections,
+      extractMenuSections,
       summarizeForChip,
     };
   }
