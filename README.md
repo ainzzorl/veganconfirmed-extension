@@ -4,14 +4,32 @@ A browser extension that provides AI-powered vegan analysis of webpage content.
 
 ## Features
 
-- **Product pages** (`content.js`) — extracts the page as markdown and asks the
-  backend whether the item is vegan, either on demand from the popup or
-  automatically when an "add to cart" button is clicked.
-- **Restaurant menus on Google Maps** (`maps.js`) — on a Maps place page, a
-  "🌱 Check menu" chip appears. It activates the Menu tab, scrolls the place
-  panel so lazy-loaded dishes render, and sends the panel text to the backend's
-  `/api/analyze-menu`, which returns a vegan verdict per dish. Results are shown
-  in the popup, grouped as vegan / likely vegan / unclear / not vegan.
+One button — "🌱 Analyze this page" — works anywhere. The extension sends the
+page to the backend's `/api/analyze`, which decides what it is looking at and
+answers accordingly:
+
+- **A shopping item** — a vegan verdict for the product, plus a cruelty-free
+  verdict for the product types that call for one.
+- **A restaurant menu** — one verdict per dish, shown in the popup grouped as
+  vegan / likely vegan / unclear / not vegan, with a restaurant-level rating.
+  This works on a restaurant's own website as well as on Google Maps.
+- **Neither** — the popup says so plainly. Most of the web is neither, so this
+  is a normal answer rather than an error.
+
+Two extractors feed that one analysis, and which one runs is the only thing the
+page's URL still decides:
+
+- `content.js` (all URLs) extracts the page as markdown. It also triggers
+  automatically when an "add to cart" button is clicked, and a non-vegan
+  product forces the popup open.
+- `maps.js` (Google Maps place pages) puts a "🌱 Check menu" chip on the page
+  and reads the place panel instead: it activates the Menu tab and scrolls so
+  lazy-loaded dishes render, which the generic extractor cannot do.
+
+Both content scripts receive the popup's trigger and divide the work by URL, so
+exactly one of them answers. `tools/check_extractor_ownership.js` enforces that
+— if both replied the page would be analyzed twice, and if neither did the
+button would appear dead.
 
 ## Local testing mode
 

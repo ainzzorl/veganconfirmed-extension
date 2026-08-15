@@ -178,8 +178,13 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
   // Remove common non-content elements. `[aria-hidden="true"]` covers off-screen
   // duplicate UI states (collapsed panels, feedback-survey alternates) that would
   // otherwise be flattened into the text and bloat/dilute the analysis input.
+  //
+  // `.menu` is deliberately NOT in this list even though it names a navigation
+  // menu on plenty of sites: on a restaurant page it just as often wraps the
+  // actual food menu, which is the whole point of analyzing the page. The
+  // nav-specific selectors below cover the navigation case without that risk.
   const nonContentElements = bodyClone.querySelectorAll(
-    'nav, footer, header, .sidebar, .navigation, .menu, .ad, .advertisement, .banner, #navFooter, [aria-hidden="true"]'
+    'nav, footer, header, .sidebar, .navigation, .navbar, .nav-menu, .menu-toggle, .ad, .advertisement, .banner, #navFooter, [aria-hidden="true"]'
   );
   nonContentElements.forEach((el) => el.remove());
 
@@ -210,6 +215,7 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
     timestamp: new Date().toISOString(),
     content: markdownContent,
     language: getPageLanguage(),
+    source: "page",
     trigger_type: triggerType,
     trigger_element_text: triggerElementText,
   };
@@ -219,8 +225,8 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
 function sendContentForAnalysis(content) {
   chrome.runtime.sendMessage(
     {
-      type: "CONTENT_FOR_ANALYSIS",
-      content: content,
+      type: "PAGE_FOR_ANALYSIS",
+      payload: content,
     },
     (response) => {
       log("Content sent for AI analysis, response:", response);
@@ -233,6 +239,17 @@ function triggerAnalysis() {
   log("Manual analysis triggered");
   const extractedContent = extractPageContent("manual", null);
   sendContentForAnalysis(extractedContent);
+}
+
+// Whether maps.js owns extraction on this page.
+//
+// Both content scripts receive every tabs.sendMessage, so exactly one of them
+// has to answer TRIGGER_PAGE_ANALYSIS. A Maps place panel needs real DOM
+// interaction to reveal its menu (clicking the Menu tab, sweeping sub-tabs,
+// scrolling to lazy-load), which maps.js does and this generic extractor
+// cannot — so on those pages this script stands down.
+function isMapsPlacePage() {
+  return /\/maps\/place\//.test(window.location.pathname);
 }
 
 // Function to detect "Add to Cart" buttons
@@ -456,9 +473,13 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     log("Content script received message:", message);
 
-    if (message.type === "TRIGGER_ANALYSIS") {
+    if (message.type === "TRIGGER_PAGE_ANALYSIS") {
+      // Leave the reply to maps.js on a place page — see isMapsPlacePage.
+      if (isMapsPlacePage()) {
+        return;
+      }
       triggerAnalysis();
-      sendResponse({ status: "analysis_triggered" });
+      sendResponse({ status: "analysis_triggered", extractor: "page" });
     }
   });
 
@@ -484,5 +505,6 @@ if (typeof module !== "undefined" && module.exports) {
     elementToMarkdown,
     cleanMarkdown,
     detectAddToCartButtons,
+    isMapsPlacePage,
   };
 }

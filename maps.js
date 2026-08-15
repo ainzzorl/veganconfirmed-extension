@@ -589,6 +589,9 @@
 
     return {
       url: window.location.href,
+      // `title` is what the backend labels the page with; the place name is the
+      // only title a Maps panel has.
+      title: restaurantName,
       restaurant_name: restaurantName,
       content: content,
       timestamp: new Date().toISOString(),
@@ -661,23 +664,41 @@
         setChipState("loading", `Analyzing menu… ${done}/${total}`);
       });
       log("extracted menu payload", payload);
-      chrome.runtime.sendMessage({ type: "MENU_FOR_ANALYSIS", payload: payload });
-      return { status: "analysis_triggered" };
+      chrome.runtime.sendMessage({ type: "PAGE_FOR_ANALYSIS", payload: payload });
+      return { status: "analysis_triggered", extractor: "google_maps" };
     } catch (error) {
       console.error("Vegan Confirmed: menu extraction failed:", error);
       isAnalyzing = false;
       setChipState("error");
       chrome.runtime.sendMessage({
-        type: "MENU_EXTRACTION_FAILED",
+        type: "PAGE_EXTRACTION_FAILED",
         error: error.message,
       });
       return { status: "extraction_failed", error: error.message };
     }
   }
 
-  // Summarise the verdict counts for the chip, which has room for one line.
+  // Summarise the result for the chip, which has room for one line.
+  //
+  // A place panel usually yields a menu, but not always: some listings carry
+  // only hours and reviews, and the backend answers with whatever kind of page
+  // it actually found rather than forcing a menu verdict.
   function summarizeForChip(analysis) {
-    if (!analysis || analysis.is_restaurant_menu === false) {
+    if (!analysis) {
+      return "\u{1F937} No menu found here";
+    }
+
+    if (analysis.page_kind === "shopping_item") {
+      if (analysis.is_vegan === true) {
+        return "\u{1F331} Vegan — see details";
+      }
+      if (analysis.is_vegan === false) {
+        return "\u{26A0}\u{FE0F} Not vegan — see details";
+      }
+      return "\u{2753} Vegan status unclear";
+    }
+
+    if (analysis.page_kind !== "restaurant_menu") {
       return "\u{1F937} No menu found here";
     }
 
@@ -739,7 +760,13 @@
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === "TRIGGER_MENU_ANALYSIS") {
+      // The popup sends one trigger to the tab and both content scripts hear
+      // it. This script answers on a place page (where it owns extraction) and
+      // stays silent elsewhere, so content.js's reply is the one that lands.
+      if (message.type === "TRIGGER_PAGE_ANALYSIS") {
+        if (!isPlacePage()) {
+          return false;
+        }
         triggerMenuAnalysis().then(sendResponse);
         return true; // response is async
       }
@@ -753,14 +780,14 @@
         return false;
       }
 
-      if (message.type === "MENU_ANALYSIS_DONE") {
+      if (message.type === "PAGE_ANALYSIS_DONE") {
         isAnalyzing = false;
         setChipState("done", summarizeForChip(message.result && message.result.analysis));
         sendResponse({ status: "received" });
         return false;
       }
 
-      if (message.type === "MENU_ANALYSIS_FAILED") {
+      if (message.type === "PAGE_ANALYSIS_FAILED") {
         isAnalyzing = false;
         setChipState("error");
         sendResponse({ status: "received" });

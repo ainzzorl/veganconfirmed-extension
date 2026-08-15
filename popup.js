@@ -23,11 +23,20 @@ function isDevMode() {
     });
 }
 
-// A Google Maps place page gets the menu flow instead of the single-item flow.
-function isMapsPlaceUrl(url) {
-    return typeof url === 'string' &&
-        /:\/\/[^/]*google\.[^/]+\//.test(url) &&
-        url.includes('/maps/place/');
+// What kind of page an analysis describes. Written by the backend as
+// `page_kind`; entries cached or recorded before the unified flow have none, so
+// they are read from the fields those versions did write.
+function resolvePageKind(analysis) {
+    if (!analysis) {
+        return 'other';
+    }
+    if (analysis.page_kind) {
+        return analysis.page_kind;
+    }
+    if (analysis.is_restaurant_menu !== undefined || analysis.type === 'menu') {
+        return 'restaurant_menu';
+    }
+    return analysis.is_shopping_item === true ? 'shopping_item' : 'other';
 }
 
 // Initialize popup
@@ -36,12 +45,14 @@ document.addEventListener('DOMContentLoaded', function () {
     const loadingDiv = document.getElementById('loading');
     const contentDiv = document.getElementById('content');
 
-    // Whether the active tab is a restaurant on Google Maps. Set during
-    // startup and consulted by the analyze button and the reset helper.
-    let menuMode = false;
+    const BUTTON_LABEL = '\u{1F331} Analyze this page';
 
-    const ITEM_BUTTON_LABEL = '\u{1F331} Check if the product is vegan';
-    const MENU_BUTTON_LABEL = '\u{1F331} Check this menu';
+    // One ceiling for every page. The popup can no longer know in advance
+    // whether it is waiting on a one-line product verdict or sixty per-dish
+    // ones, and a restaurant page off Maps is just as slow as one on it. Real
+    // failures still arrive early via PAGE_ERROR_FOR_POPUP, so the long
+    // timeout only bites on a genuine hang.
+    const ANALYSIS_TIMEOUT_MS = 120000;
 
     // Establish connection to background script for popup close detection
     const port = chrome.runtime.connect({ name: 'popup' });
@@ -56,37 +67,16 @@ document.addEventListener('DOMContentLoaded', function () {
     chrome.storage.local.get(['warning_analysis'], function (result) {
         if (result.warning_analysis) {
             // Display the warning analysis immediately
-            displayAnalysis(result.warning_analysis, true);
+            displayPageAnalysis(result.warning_analysis, true);
             // Clear the stored data to prevent showing it again
             chrome.storage.local.remove(['warning_analysis']);
             // Note: Badge will be cleared when popup closes via background script
             return;
         }
 
-        // If no non-vegan analysis, check for regular analysis results for this page
+        // If no warning analysis, check for a cached result for this page
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            const currentTab = tabs[0];
-
-            if (isMapsPlaceUrl(currentTab.url)) {
-                setupMenuMode(currentTab);
-                return;
-            }
-
-            const analysisKey = `${currentTab.url}_analysis`;
-
-            isDevMode().then(function (devMode) {
-                if (devMode) {
-                    return;
-                }
-
-                chrome.storage.local.get([analysisKey], function (result) {
-                    const analysisData = result[analysisKey];
-
-                    if (analysisData && analysisData.analysis) {
-                        displayAnalysis(analysisData.analysis, false);
-                    }
-                });
-            });
+            showCachedAnalysis(tabs[0]);
         });
 
         // Note: Badge will be cleared when popup closes via background script
@@ -163,9 +153,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 let statusText = 'Unknown';
                 let statusClass = 'unknown';
 
-                // Menu entries (type: 'menu') summarise a whole restaurant.
-                // Entries written before menu support existed have no `type`.
-                if (item.type === 'menu') {
+                // Menu entries summarise a whole restaurant. Entries written
+                // before the unified flow carry `type: 'menu'` instead of a
+                // `page_kind`; resolvePageKind reads both.
+                const pageKind = resolvePageKind(item);
+
+                if (pageKind === 'restaurant_menu') {
                     const veganTotal = (item.vegan_count || 0) + (item.likely_vegan_count || 0);
                     statusClass = 'menu';
                     statusText = item.is_restaurant_menu === false
@@ -183,22 +176,20 @@ document.addEventListener('DOMContentLoaded', function () {
                     `;
                 }
 
-                if (item.is_shopping_item === false) {
-                    statusText = 'Not Shopping Item';
+                if (pageKind !== 'shopping_item') {
+                    statusText = 'Not a product or a menu';
                     statusClass = 'not-shopping';
-                } else if (item.is_shopping_item === true) {
-                    if (item.is_vegan === true) {
-                        statusText = 'Vegan';
-                        statusClass = 'vegan';
-                    } else if (item.is_vegan === false) {
-                        statusText = 'Not Vegan';
-                        statusClass = 'not-vegan';
+                } else if (item.is_vegan === true) {
+                    statusText = 'Vegan';
+                    statusClass = 'vegan';
+                } else if (item.is_vegan === false) {
+                    statusText = 'Not Vegan';
+                    statusClass = 'not-vegan';
 
-                        // Add confidence-based styling for non-vegan items in history
-                        if (item.confidence_level) {
-                            const confidence = item.confidence_level.toLowerCase();
-                            statusClass += ` ${confidence}-confidence`;
-                        }
+                    // Add confidence-based styling for non-vegan items in history
+                    if (item.confidence_level) {
+                        const confidence = item.confidence_level.toLowerCase();
+                        statusClass += ` ${confidence}-confidence`;
                     }
                 }
 
@@ -245,49 +236,54 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Switch the popup to the Google Maps menu flow and show a cached result
-    // for this restaurant if we have one.
-    function setupMenuMode(tab) {
-        menuMode = true;
-        analyzeButton.textContent = MENU_BUTTON_LABEL;
+    // Ask the tab for the Google Maps place it is showing.
+    //
+    // Only maps.js answers this, and only on a place page, so a null reply is
+    // the ordinary answer for the rest of the web rather than an error.
+    function getPlaceInfo(tab) {
+        return new Promise((resolve) => {
+            chrome.tabs.sendMessage(tab.id, { type: 'GET_PLACE_INFO' }, function (info) {
+                if (chrome.runtime.lastError || !info || !info.place_key) {
+                    resolve(null);
+                    return;
+                }
+                resolve(info);
+            });
+        });
+    }
 
-        chrome.tabs.sendMessage(tab.id, { type: 'GET_PLACE_INFO' }, function (info) {
-            if (chrome.runtime.lastError || !info || !info.place_key) {
-                // Content script not yet injected (e.g. the tab was open before
-                // the extension was installed or reloaded). The button still
-                // works once the page is refreshed.
-                console.log('No place info available for this tab');
+    // Show the cached analysis for the active tab, if there is a usable one.
+    async function showCachedAnalysis(tab) {
+        if (await isDevMode()) {
+            return;
+        }
+
+        const placeInfo = await getPlaceInfo(tab);
+        // Must match the key background.js caches under (see cacheKeyFor).
+        const cacheKey = placeInfo
+            ? `menu:${placeInfo.place_key}_analysis`
+            : `${tab.url}_analysis`;
+
+        chrome.storage.local.get([cacheKey], function (result) {
+            const cached = result[cacheKey];
+            if (!cached || !cached.analysis) {
                 return;
             }
 
-            // Must match the key background.js caches under.
-            const cacheKey = `menu:${info.place_key}_analysis`;
-            isDevMode().then(function (devMode) {
-                if (devMode) {
+            // For a place, only show it if the entry demonstrably belongs to
+            // this one — the same check background.js makes. A Maps URL can
+            // carry several place ids, so a key alone is not proof of identity.
+            if (placeInfo) {
+                const cachedPlace = cached.cached_place;
+                if (!cachedPlace ||
+                    (cachedPlace.name && placeInfo.restaurant_name &&
+                        cachedPlace.name !== placeInfo.restaurant_name)) {
+                    console.log('Ignoring menu cache entry that does not match this place');
                     return;
                 }
+            }
 
-                chrome.storage.local.get([cacheKey], function (result) {
-                    const cached = result[cacheKey];
-                    if (!cached || !cached.analysis) {
-                        return;
-                    }
-
-                    // Only show it if the entry demonstrably belongs to this
-                    // place — the same check background.js makes. A Maps URL
-                    // can carry several place ids, so a key alone is not proof
-                    // of identity.
-                    const cachedPlace = cached.cached_place;
-                    if (!cachedPlace ||
-                        (cachedPlace.name && info.restaurant_name &&
-                            cachedPlace.name !== info.restaurant_name)) {
-                        console.log('Ignoring menu cache entry that does not match this place');
-                        return;
-                    }
-
-                    displayMenuAnalysis(cached.analysis);
-                });
-            });
+            displayPageAnalysis(cached.analysis, false);
         });
     }
 
@@ -297,9 +293,7 @@ document.addEventListener('DOMContentLoaded', function () {
         analyzeButton.textContent = 'Analyzing...';
         loadingDiv.style.display = 'block';
         loadingDiv.className = 'loading';
-        loadingDiv.textContent = menuMode
-            ? 'Reading the menu…'
-            : 'Analyzing page content...';
+        loadingDiv.textContent = 'Analyzing this page...';
         contentDiv.style.display = 'none';
         document.getElementById('menu-content').style.display = 'none';
 
@@ -307,9 +301,10 @@ document.addEventListener('DOMContentLoaded', function () {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             const currentTab = tabs[0];
 
-            // Send message to content script to extract and analyze content
+            // Send message to the content scripts to extract and analyze the
+            // page. Both hear it; whichever owns extraction here replies.
             chrome.tabs.sendMessage(currentTab.id, {
-                type: menuMode ? 'TRIGGER_MENU_ANALYSIS' : 'TRIGGER_ANALYSIS'
+                type: 'TRIGGER_PAGE_ANALYSIS'
             }, function (response) {
                 if (chrome.runtime.lastError) {
                     console.error('Error sending message to content script:', chrome.runtime.lastError);
@@ -319,53 +314,39 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 // Analysis is now triggered, results will come via message
-                console.log('Analysis triggered successfully');
+                console.log('Analysis triggered successfully', response);
 
-                // Set a timeout in case the analysis takes too long. Menus are
-                // slower: the page has to be scrolled to load every dish, and
-                // the model writes a verdict per dish rather than one verdict.
-                const timeoutMs = menuMode ? 120000 : 30000;
+                // Set a timeout in case the analysis takes too long.
                 setTimeout(function () {
                     if (loadingDiv.style.display !== 'none') {
                         displayError('Analysis timed out. Please try again.');
                         resetButton();
                     }
-                }, timeoutMs);
+                }, ANALYSIS_TIMEOUT_MS);
             });
         });
     }
 
     // Listen for analysis results from content script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.type === 'ANALYSIS_RESULT_FOR_POPUP') {
+        if (message.type === 'PAGE_RESULT_FOR_POPUP') {
             console.log('Received analysis result:', message.result);
             if (message.result && message.result.analysis) {
-                displayAnalysis(message.result.analysis, false);
+                displayPageAnalysis(message.result.analysis, false);
                 resetButton();
                 // Reload history to show the new analysis
                 loadAnalysisHistory();
             }
-        } else if (message.type === 'ANALYSIS_ERROR_FOR_POPUP') {
+        } else if (message.type === 'PAGE_ERROR_FOR_POPUP') {
             console.log('Received analysis error:', message.error);
             displayError(message.error || 'Analysis failed. Please try again.');
-            resetButton();
-        } else if (message.type === 'MENU_RESULT_FOR_POPUP') {
-            console.log('Received menu analysis result:', message.result);
-            if (message.result && message.result.analysis) {
-                displayMenuAnalysis(message.result.analysis);
-                resetButton();
-                loadAnalysisHistory();
-            }
-        } else if (message.type === 'MENU_ERROR_FOR_POPUP') {
-            console.log('Received menu analysis error:', message.error);
-            displayError(message.error || 'Menu analysis failed. Please try again.');
             resetButton();
         }
     });
 
     function resetButton() {
         analyzeButton.disabled = false;
-        analyzeButton.textContent = menuMode ? MENU_BUTTON_LABEL : ITEM_BUTTON_LABEL;
+        analyzeButton.textContent = BUTTON_LABEL;
         loadingDiv.style.display = 'none';
     }
 
@@ -378,9 +359,48 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-function displayAnalysis(analysis, isWarningAnalysis = false) {
+// Render an analysis of any page, dispatching on what the page turned out to be.
+function displayPageAnalysis(analysis, isWarningAnalysis = false) {
+    switch (resolvePageKind(analysis)) {
+        case 'restaurant_menu':
+            displayMenuAnalysis(analysis);
+            break;
+        case 'shopping_item':
+            displayItemAnalysis(analysis, isWarningAnalysis);
+            break;
+        default:
+            displayOtherAnalysis(analysis);
+    }
+}
+
+// A page that is neither a product nor a menu. Not an error — most of the web
+// is neither — so it gets the same panel as a product, stated plainly and
+// without the product-specific sections.
+function displayOtherAnalysis(analysis) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('menu-content').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+
+    const statusElement = document.getElementById('veganStatus');
+    statusElement.textContent = '\u{1F4D6} Not a product or a menu';
+    statusElement.className = 'vegan-status not-shopping';
+
+    document.getElementById('confidence').textContent = '';
+
+    const explanationElement = document.getElementById('explanation');
+    explanationElement.className = 'explanation';
+    explanationElement.textContent = analysis.explanation ||
+        analysis.summary ||
+        'There is nothing on this page to check.';
+
+    document.getElementById('avoided-ingredients').style.display = 'none';
+    document.getElementById('crueltyFreeSection').style.display = 'none';
+}
+
+function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     // Hide loading, show content
     document.getElementById('loading').style.display = 'none';
+    document.getElementById('menu-content').style.display = 'none';
     document.getElementById('content').style.display = 'block';
 
     // Display vegan status
@@ -389,74 +409,64 @@ function displayAnalysis(analysis, isWarningAnalysis = false) {
     // Determine the item text based on whether this is a warning analysis
     const itemText = isWarningAnalysis ? 'The last added item' : 'This item';
 
-    // First check if this is a shopping item
-    if (analysis.is_shopping_item === false) {
-        statusElement.textContent = '\u{1F4D6} Not a Shopping Item';
-        statusElement.className = 'vegan-status not-shopping';
-    } else if (analysis.is_shopping_item === true) {
-        // It's a shopping item, now check vegan status
-        if (analysis.is_vegan === true) {
-            let statusText = `\u{1F331} ${itemText} is VEGAN`;
+    if (analysis.is_vegan === true) {
+        let statusText = `\u{1F331} ${itemText} is VEGAN`;
 
-            // Update text based on confidence level
-            if (analysis.confidence_level) {
-                const confidence = analysis.confidence_level.toLowerCase();
-                if (confidence === 'low') {
-                    statusText = `\u{1F331} ${itemText} MAY be vegan`;
-                } else if (confidence === 'medium') {
-                    statusText = `\u{1F331} ${itemText} is LIKELY vegan`;
-                } else if (confidence === 'high') {
-                    statusText = `\u{1F331} ${itemText} is VEGAN`;
-                }
+        // Update text based on confidence level
+        if (analysis.confidence_level) {
+            const confidence = analysis.confidence_level.toLowerCase();
+            if (confidence === 'low') {
+                statusText = `\u{1F331} ${itemText} MAY be vegan`;
+            } else if (confidence === 'medium') {
+                statusText = `\u{1F331} ${itemText} is LIKELY vegan`;
+            } else if (confidence === 'high') {
+                statusText = `\u{1F331} ${itemText} is VEGAN`;
             }
-
-            statusElement.textContent = statusText;
-            statusElement.className = 'vegan-status vegan';
-        } else if (analysis.is_vegan === false) {
-            let statusText = `\u{26A0}\u{FE0F} ${itemText} is NOT VEGAN`;
-            let statusClass = 'vegan-status not-vegan';
-
-            // Update text based on confidence level
-            if (analysis.confidence_level) {
-                const confidence = analysis.confidence_level.toLowerCase();
-                if (confidence === 'low') {
-                    statusText = `\u{2753} ${itemText} MAY NOT be vegan`;
-                } else if (confidence === 'medium') {
-                    statusText = `\u{26A0}\u{FE0F} ${itemText} is LIKELY NOT vegan`;
-                } else if (confidence === 'high') {
-                    statusText = `\u{26A0}\u{FE0F} ${itemText} is NOT VEGAN`;
-                }
-            }
-
-            statusElement.textContent = statusText;
-
-            // Add confidence-based styling for non-vegan items
-            if (analysis.confidence_level) {
-                const confidence = analysis.confidence_level.toLowerCase();
-                statusClass += ` ${confidence}-confidence`;
-            }
-
-            statusElement.className = statusClass;
-        } else {
-            statusElement.textContent = '\u{2753} Unable to determine vegan status';
-            statusElement.className = 'vegan-status unknown';
         }
+
+        statusElement.textContent = statusText;
+        statusElement.className = 'vegan-status vegan';
+    } else if (analysis.is_vegan === false) {
+        let statusText = `\u{26A0}\u{FE0F} ${itemText} is NOT VEGAN`;
+        let statusClass = 'vegan-status not-vegan';
+
+        // Update text based on confidence level
+        if (analysis.confidence_level) {
+            const confidence = analysis.confidence_level.toLowerCase();
+            if (confidence === 'low') {
+                statusText = `\u{2753} ${itemText} MAY NOT be vegan`;
+            } else if (confidence === 'medium') {
+                statusText = `\u{26A0}\u{FE0F} ${itemText} is LIKELY NOT vegan`;
+            } else if (confidence === 'high') {
+                statusText = `\u{26A0}\u{FE0F} ${itemText} is NOT VEGAN`;
+            }
+        }
+
+        statusElement.textContent = statusText;
+
+        // Add confidence-based styling for non-vegan items
+        if (analysis.confidence_level) {
+            const confidence = analysis.confidence_level.toLowerCase();
+            statusClass += ` ${confidence}-confidence`;
+        }
+
+        statusElement.className = statusClass;
     } else {
-        // is_shopping_item is null/undefined, treat as unknown
-        statusElement.textContent = '\u{2753} Unable to determine content type';
+        statusElement.textContent = '\u{2753} Unable to determine vegan status';
         statusElement.className = 'vegan-status unknown';
     }
 
     // Display confidence level
     const confidenceElement = document.getElementById('confidence');
-    if (analysis.confidence_level) {
-        confidenceElement.textContent = `Confidence: ${analysis.confidence_level.toUpperCase()}`;
-    }
+    confidenceElement.textContent = analysis.confidence_level
+        ? `Confidence: ${analysis.confidence_level.toUpperCase()}`
+        : '';
 
     // Display explanation
     const explanationElement = document.getElementById('explanation');
     if (analysis.explanation) {
         explanationElement.textContent = analysis.explanation;
+        explanationElement.className = 'explanation';
     } else {
         explanationElement.textContent = 'No explanation available';
         explanationElement.className = 'explanation error';
