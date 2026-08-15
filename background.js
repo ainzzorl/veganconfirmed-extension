@@ -20,6 +20,11 @@ const PROD_BACKEND_URL = 'https://api.veganconfirmed.com';
 const LOCAL_BACKEND_URL = 'http://localhost:5555';
 const BACKEND_URL = DEV_MODE ? LOCAL_BACKEND_URL : PROD_BACKEND_URL;
 
+// The extension version, sent with every analysis request so the backend can
+// record which version a call came from. Read from the manifest rather than
+// kept as a second copy here, so bumping the manifest is the only step.
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+
 // Cache configuration
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
@@ -331,7 +336,8 @@ async function sendPageAnalysis(payload) {
         // Add avoided ingredients to the payload for analysis
         const payloadWithSettings = {
             ...payload,
-            user_avoided_ingredients: avoidedIngredients
+            user_avoided_ingredients: avoidedIngredients,
+            extension_version: EXTENSION_VERSION
         };
 
         console.log(`Analyzing against ${BACKEND_URL}`);
