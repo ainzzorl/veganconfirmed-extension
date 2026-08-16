@@ -161,6 +161,223 @@ function elementToMarkdown(element) {
   }
 }
 
+// A page that splits its menu into collapsible sections often renders each
+// section's rows only once it is clicked, so at extraction time the DOM holds
+// the section headings and nothing else — the dishes exist only in an embedded
+// JSON payload (Next.js `__NEXT_DATA__`, a framework's hydration state,
+// JSON-LD). The helpers below mine those payloads for name/price/description
+// records and append the ones the page is not already showing.
+const DATA_PAYLOAD_SELECTOR =
+  'script[type="application/json"], script[type="application/ld+json"]';
+
+// Bounds, since a hydration payload can be megabytes of arbitrary structure.
+const MAX_PAYLOAD_CHARS = 2000000;
+const MAX_PAYLOAD_NODES = 200000;
+const MAX_PAYLOAD_DEPTH = 20;
+const MAX_DATA_RECORDS = 200;
+const MAX_DATA_CHARS = 20000;
+const MAX_NAME_CHARS = 120;
+const MAX_DESCRIPTION_CHARS = 300;
+
+// Keys that name the group a record belongs to (a menu section, a category).
+// `primary` is where slice-based CMSes (Prismic) keep a section's own fields,
+// beside the `items` array it labels.
+const SECTION_LABEL_KEYS = [
+  "page_name",
+  "section_name",
+  "section_title",
+  "group_name",
+  "category_name",
+  "menu_section",
+];
+
+function normalizeForMatch(text) {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function sectionLabelOf(obj) {
+  for (const key of SECTION_LABEL_KEYS) {
+    if (typeof obj[key] === "string" && obj[key].trim()) {
+      return obj[key].trim();
+    }
+  }
+  if (obj["@type"] === "MenuSection" && typeof obj.name === "string") {
+    return obj.name.trim();
+  }
+  if (obj.primary && typeof obj.primary === "object" && !Array.isArray(obj.primary)) {
+    return sectionLabelOf(obj.primary);
+  }
+  return null;
+}
+
+// `priceCurrency` and friends sit next to `price` in JSON-LD and are not one.
+function priceOf(obj) {
+  for (const [key, value] of Object.entries(obj)) {
+    if (!/price/i.test(key) || /currency|range/i.test(key)) {
+      continue;
+    }
+    if (typeof value === "number") {
+      return String(value);
+    }
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+// A record is an object carrying a name plus something that makes it a listed
+// item rather than an incidental label: a description, a price, or a section
+// the page is showing (plenty of menus list a side dish by name alone).
+function recordOf(obj, section) {
+  const name = typeof obj.name === "string" ? obj.name.trim() : "";
+  if (!name || name.length > MAX_NAME_CHARS || !/[a-z]/i.test(name)) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(name)) {
+    return null;
+  }
+  const description =
+    typeof obj.description === "string"
+      ? obj.description.trim().slice(0, MAX_DESCRIPTION_CHARS)
+      : "";
+  const price = priceOf(obj);
+  if (!description && !price && !section) {
+    return null;
+  }
+  return { section: section || "", name, description, price };
+}
+
+function collectDataRecords() {
+  const records = [];
+  const seen = new Set();
+  let nodes = 0;
+
+  const visit = (value, section, depth) => {
+    if (
+      nodes >= MAX_PAYLOAD_NODES ||
+      records.length >= MAX_DATA_RECORDS ||
+      depth > MAX_PAYLOAD_DEPTH
+    ) {
+      return;
+    }
+    nodes += 1;
+
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        visit(child, section, depth + 1);
+      }
+      return;
+    }
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    // A label found here applies to everything below it.
+    const label = sectionLabelOf(value) || section;
+    const record = recordOf(value, label);
+    if (record) {
+      const key = normalizeForMatch(
+        `${record.section}|${record.name}|${record.description}`
+      );
+      if (!seen.has(key)) {
+        seen.add(key);
+        records.push(record);
+      }
+    }
+    for (const child of Object.values(value)) {
+      visit(child, label, depth + 1);
+    }
+  };
+
+  for (const script of document.querySelectorAll(DATA_PAYLOAD_SELECTOR)) {
+    const raw = script.textContent;
+    if (!raw || raw.length > MAX_PAYLOAD_CHARS) {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      continue;
+    }
+    visit(parsed, null, 0);
+  }
+
+  return records;
+}
+
+function renderDataRecords(records) {
+  const lines = ["## Additional items from page data"];
+  let currentSection = null;
+  let budget = MAX_DATA_CHARS;
+
+  for (const record of records) {
+    const line = `- ${[record.name, record.price, record.description]
+      .filter(Boolean)
+      .join(" — ")}`;
+    const heading =
+      record.section !== currentSection && record.section
+        ? `\n### ${record.section}`
+        : "";
+    if (line.length + heading.length > budget) {
+      break;
+    }
+    budget -= line.length + heading.length;
+    if (heading) {
+      lines.push(heading);
+    }
+    currentSection = record.section;
+    lines.push(line);
+  }
+
+  return lines.length > 1 ? lines.join("\n") : "";
+}
+
+// Returns the markdown to append to `visibleMarkdown`, or "" if the payloads add
+// nothing.
+function extractDataPayloadItems(visibleMarkdown) {
+  let records = collectDataRecords();
+  if (!records.length) {
+    return "";
+  }
+  const visible = normalizeForMatch(visibleMarkdown);
+
+  // The page names the sections it is showing, so a section of the payload that
+  // is nowhere on it belongs to another page (the drinks menu this one links
+  // to). Only applied when some section is visible — a page that renders no
+  // headings at all is not evidence against anything.
+  const sections = new Set(
+    records.map((record) => record.section).filter(Boolean)
+  );
+  const visibleSections = new Set(
+    [...sections]
+      .map(normalizeForMatch)
+      .filter((section) => visible.includes(section))
+  );
+  if (visibleSections.size) {
+    records = records.filter(
+      (record) =>
+        !record.section || visibleSections.has(normalizeForMatch(record.section))
+    );
+  }
+
+  // Drop what the page already shows: a product page repeats its own item in
+  // JSON-LD, and sending it twice only costs tokens.
+  records = records.filter((record) => {
+    const nameShown = visible.includes(normalizeForMatch(record.name));
+    const descriptionShown =
+      !record.description ||
+      visible.includes(normalizeForMatch(record.description));
+    return !(nameShown && descriptionShown);
+  });
+  if (!records.length) {
+    return "";
+  }
+
+  return renderDataRecords(records);
+}
+
 // Function to extract clean text content from the current page for AI analysis
 function extractPageContent(
   triggerType = "manual",
@@ -213,11 +430,18 @@ function extractPageContent(
 
   const markdownContent = cleanMarkdown(rawMarkdown);
 
+  // Appended last so the page's own text stays first if the backend has to
+  // truncate to its token budget.
+  const dataItems = extractDataPayloadItems(markdownContent);
+  const content = dataItems
+    ? `${markdownContent}\n\n${dataItems}`
+    : markdownContent;
+
   return {
     url: window.location.href,
     title: document.title,
     timestamp: new Date().toISOString(),
-    content: markdownContent,
+    content,
     language: getPageLanguage(),
     source: "page",
     trigger_type: triggerType,
@@ -596,6 +820,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractPageContent,
+    extractDataPayloadItems,
     elementToMarkdown,
     cleanMarkdown,
     detectAddToCartButtons,
