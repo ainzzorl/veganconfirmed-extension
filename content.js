@@ -450,6 +450,70 @@ function extractPageContent(
   };
 }
 
+// Shown when a PDF carries no text we can read. Design tools routinely convert
+// menu type to vector outlines, which leaves the prices as the only real text
+// in the file — enough to look like a menu, nowhere near enough to be one.
+const PDF_NO_TEXT_MESSAGE =
+  "This PDF has no readable text — it looks like a scanned or image-based menu.";
+
+// Whether the tab is showing a PDF rather than an HTML page.
+//
+// Chrome serves a PDF as a stream document whose body is a single `<embed>`,
+// and content scripts do run there — but `extractPageContent` strips `embed`
+// (see the removal list above) and would send an empty page. `contentType` is
+// the reliable signal; the `<embed>` check covers a PDF framed inside an
+// otherwise-HTML document.
+function isPdfDocument() {
+  if (document.contentType === "application/pdf") {
+    return true;
+  }
+  return Boolean(document.body?.querySelector('embed[type="application/pdf"]'));
+}
+
+// Read the PDF's text layer and build the same payload the HTML path builds.
+//
+// pdf.js is loaded on demand rather than shipped as a content script: it is
+// ~1.8MB, and the overwhelming majority of pages are not PDFs. Both it and
+// pdf_extract.mjs are ES modules listed in web_accessible_resources, so a
+// dynamic import from this isolated world resolves them.
+//
+// Throws when the PDF has no usable text layer, which the caller reports rather
+// than analyzing — see PDF_NO_TEXT_MESSAGE.
+async function extractPdfPageContent(triggerType = "manual") {
+  const pdfjsLib = await import(chrome.runtime.getURL("vendor/pdf.min.mjs"));
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
+    "vendor/pdf.worker.min.mjs"
+  );
+  const { extractPdfText } = await import(
+    chrome.runtime.getURL("pdf_extract.mjs")
+  );
+
+  const result = await extractPdfText(pdfjsLib, {
+    url: window.location.href,
+    // The viewer already fetched this document; go through the same cookies and
+    // cache rather than asking the server for it as an anonymous request.
+    withCredentials: true,
+  });
+
+  if (!result.readable) {
+    throw new Error(PDF_NO_TEXT_MESSAGE);
+  }
+
+  return {
+    url: window.location.href,
+    // A PDF has no <title>; the browser shows the filename. The document's own
+    // Title is the better label when it is not just the source filename.
+    title: result.title || document.title,
+    timestamp: new Date().toISOString(),
+    content: result.content,
+    language: getPageLanguage(),
+    source: "pdf",
+    trigger_type: triggerType,
+    trigger_element_text: null,
+    trigger_element_selector: null,
+  };
+}
+
 // Function to send extracted content to backend for AI analysis
 function sendContentForAnalysis(content) {
   chrome.runtime.sendMessage(
@@ -463,9 +527,34 @@ function sendContentForAnalysis(content) {
   );
 }
 
+// Tell the popup extraction failed, the way maps.js does when it cannot read a
+// place panel. The alternative — sending what little we got — is worse than
+// saying nothing: an empty page comes back classified as "other", and a page of
+// bare prices comes back as a menu of invented dishes.
+function sendExtractionFailure(error) {
+  chrome.runtime.sendMessage({
+    type: "PAGE_EXTRACTION_FAILED",
+    error: error,
+  });
+}
+
 // Function to trigger analysis manually
 function triggerAnalysis() {
   log("Manual analysis triggered");
+
+  if (isPdfDocument()) {
+    log("PDF detected - reading its text layer");
+    extractPdfPageContent("manual")
+      .then(sendContentForAnalysis)
+      .catch((error) => {
+        log("PDF extraction failed:", error);
+        sendExtractionFailure(
+          error && error.message ? error.message : String(error)
+        );
+      });
+    return;
+  }
+
   const extractedContent = extractPageContent("manual", null);
   sendContentForAnalysis(extractedContent);
 }
@@ -826,5 +915,6 @@ if (typeof module !== "undefined" && module.exports) {
     detectAddToCartButtons,
     buildElementSelector,
     isMapsPlacePage,
+    isPdfDocument,
   };
 }

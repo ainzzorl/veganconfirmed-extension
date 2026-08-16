@@ -31,6 +31,29 @@ exactly one of them answers. `tools/check_extractor_ownership.js` enforces that
 — if both replied the page would be analyzed twice, and if neither did the
 button would appear dead.
 
+### PDF menus
+
+Plenty of restaurants publish their menu as a PDF. `content.js` recognises one
+from `document.contentType` and reads its text layer with pdf.js
+(`pdf_extract.mjs`) instead of the DOM, which would otherwise yield an empty
+page — Chrome's viewer is a single `<embed>`, and the markdown extractor strips
+those. The text goes to the backend in the ordinary `content` field, so a PDF
+menu is analyzed by exactly the same path as an HTML one.
+
+pdf.js is ~1.8MB and almost no page is a PDF, so it is not a content script:
+`vendor/pdf.min.mjs` and `pdf_extract.mjs` are web-accessible ES modules that
+`content.js` pulls in with a dynamic `import()` only once it has seen a PDF.
+
+Menus whose type was converted to vector outlines (a common export from design
+tools) carry no readable text — often only the prices survive. The extractor
+counts letter-words per page and reports "no readable text" below the threshold
+rather than sending prices with no dish names, which the model would fill in by
+inventing them.
+
+Firefox is a known gap: it renders PDFs in a privileged `resource://` viewer
+where content scripts do not run, so the popup falls back to its generic
+"Could not analyze this page".
+
 ## Local testing mode
 
 Set `DEV_MODE = true` at the top of `background.js` to test against a backend

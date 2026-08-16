@@ -69,6 +69,18 @@
       "background.js"
     ]
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pdf_extract.mjs",
+        "vendor/pdf.min.mjs",
+        "vendor/pdf.worker.min.mjs"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "veganconfirmed@gmail.com"
