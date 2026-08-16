@@ -162,7 +162,11 @@ function elementToMarkdown(element) {
 }
 
 // Function to extract clean text content from the current page for AI analysis
-function extractPageContent(triggerType = "manual", triggerElementText = null) {
+function extractPageContent(
+  triggerType = "manual",
+  triggerElementText = null,
+  triggerElementSelector = null
+) {
   // Clone the body to avoid modifying the original page
   const bodyClone = document.body.cloneNode(true);
 
@@ -218,6 +222,7 @@ function extractPageContent(triggerType = "manual", triggerElementText = null) {
     source: "page",
     trigger_type: triggerType,
     trigger_element_text: triggerElementText,
+    trigger_element_selector: triggerElementSelector,
   };
 }
 
@@ -346,6 +351,86 @@ function detectAddToCartButtons() {
   return buttons;
 }
 
+// Bounds for the selector built below: a page can nest a button dozens of
+// levels deep and hang twenty utility classes off each one.
+const MAX_SELECTOR_DEPTH = 8;
+const MAX_SELECTOR_CLASSES = 3;
+const MAX_SELECTOR_CHARS = 500;
+
+function escapeSelectorPart(value) {
+  if (typeof CSS !== "undefined" && CSS.escape) {
+    return CSS.escape(value);
+  }
+  return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function matchesOnly(selector, element) {
+  try {
+    const matches = document.querySelectorAll(selector);
+    return matches.length === 1 && matches[0] === element;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Build a CSS selector that identifies `element` on the page it was clicked on.
+// Walks up the ancestors adding tag/class/:nth-of-type steps, stopping as soon
+// as the path matches this element and nothing else, or at the first id that is
+// unique on the page. Attributes are read with getAttribute and classList
+// because a <form> whose fields are named `id`/`className` shadows those
+// properties.
+function buildElementSelector(element) {
+  if (!element || element.nodeType !== Node.ELEMENT_NODE) {
+    return null;
+  }
+
+  const steps = [];
+  for (
+    let current = element;
+    current &&
+    current.nodeType === Node.ELEMENT_NODE &&
+    steps.length < MAX_SELECTOR_DEPTH;
+    current = current.parentElement
+  ) {
+    const id = current.getAttribute("id");
+    if (id && matchesOnly(`#${escapeSelectorPart(id)}`, current)) {
+      steps.unshift(`#${escapeSelectorPart(id)}`);
+      break;
+    }
+
+    let step = current.localName;
+    for (const className of Array.from(current.classList).slice(
+      0,
+      MAX_SELECTOR_CLASSES
+    )) {
+      step += `.${escapeSelectorPart(className)}`;
+    }
+
+    const parent = current.parentElement;
+    if (parent) {
+      const twins = Array.from(parent.children).filter(
+        (child) => child.localName === current.localName
+      );
+      if (twins.length > 1) {
+        step += `:nth-of-type(${twins.indexOf(current) + 1})`;
+      }
+    }
+
+    steps.unshift(step);
+    if (matchesOnly(steps.join(" > "), element)) {
+      break;
+    }
+  }
+
+  // Over the budget, drop ancestors rather than characters: a shorter path is
+  // still a valid selector, a truncated one is not.
+  while (steps.length > 1 && steps.join(" > ").length > MAX_SELECTOR_CHARS) {
+    steps.shift();
+  }
+
+  return steps.join(" > ") || null;
+}
+
 // Function to handle add to cart button clicks
 function handleAddToCartClick(event) {
   // Prevent multiple simultaneous analyses
@@ -354,8 +439,12 @@ function handleAddToCartClick(event) {
     return;
   }
 
+  // The detected button, not event.target: the click usually lands on a child
+  // (the <span> holding the label), which carries none of the button's identity.
+  const button = event.currentTarget || event.target;
+  const triggerElementSelector = buildElementSelector(button);
+
   // Log detailed information about the button that was clicked
-  const button = event.target;
   const buttonInfo = {
     text: button.textContent?.trim() || button.value?.trim() || "No text",
     className: button.className || "No class",
@@ -367,6 +456,7 @@ function handleAddToCartClick(event) {
     dataAction: button.getAttribute("data-action") || "No data-action",
     type: button.type || "No type",
     href: button.href || "No href",
+    selector: triggerElementSelector || "No selector",
   };
 
   log(
@@ -385,7 +475,11 @@ function handleAddToCartClick(event) {
     "Unknown button";
 
   // Trigger analysis
-  const extractedContent = extractPageContent("automatic", triggerElementText);
+  const extractedContent = extractPageContent(
+    "automatic",
+    triggerElementText,
+    triggerElementSelector
+  );
   sendContentForAnalysis(extractedContent);
 
   // Reset analyzing flag after a reasonable timeout
@@ -505,6 +599,7 @@ if (typeof module !== "undefined" && module.exports) {
     elementToMarkdown,
     cleanMarkdown,
     detectAddToCartButtons,
+    buildElementSelector,
     isMapsPlacePage,
   };
 }
