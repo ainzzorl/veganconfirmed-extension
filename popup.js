@@ -57,6 +57,15 @@ document.addEventListener('DOMContentLoaded', function () {
     // Establish connection to background script for popup close detection
     const port = chrome.runtime.connect({ name: 'popup' });
 
+    // Whether a live message has already put something on screen.
+    //
+    // Restoring state on open is asynchronous, so an analysis that lands in
+    // the moment between the popup opening and that answer coming back would
+    // be rendered and then covered over by the spinner for an analysis that
+    // has, by then, already finished. The listener sets this; the restore
+    // path stands down when it is set.
+    let liveUpdateShown = false;
+
     // Setup tab functionality
     setupTabs();
 
@@ -74,9 +83,9 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        // If no warning analysis, check for a cached result for this page
+        // If no warning analysis, pick up whatever this tab was left doing
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            showCachedAnalysis(tabs[0]);
+            restoreAnalysisState(tabs[0]);
         });
 
         // Note: Badge will be cleared when popup closes via background script
@@ -252,13 +261,87 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Show the cached analysis for the active tab, if there is a usable one.
-    async function showCachedAnalysis(tab) {
-        if (await isDevMode()) {
+    // Ask the background what this tab's analysis is doing, passing the key we
+    // believe the page would be analyzed under so it can tell us apart from an
+    // analysis the tab started before navigating somewhere else.
+    function getAnalysisState(tabId, key, name) {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+                { type: 'GET_ANALYSIS_STATE', tabId: tabId, key: key, name: name },
+                function (response) {
+                    if (chrome.runtime.lastError || !response) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(response.record || null);
+                }
+            );
+        });
+    }
+
+    // Put the popup back where the tab left it.
+    //
+    // The popup closes the instant the user clicks anywhere else, and an
+    // analysis runs for up to two minutes, so this is an ordinary path rather
+    // than an edge case: reopening mid-analysis restores the spinner and waits
+    // for the same result, and reopening afterwards shows it.
+    //
+    // A finished record is preferred over the cache because it is the one
+    // source that is right in every mode — in DEV_MODE nothing is cached at
+    // all, and a reopened popup would otherwise show nothing.
+    async function restoreAnalysisState(tab) {
+        if (!tab) {
             return;
         }
 
         const placeInfo = await getPlaceInfo(tab);
+        // Must match the key background.js works in (see cacheKeyFor).
+        const key = placeInfo ? `menu:${placeInfo.place_key}` : tab.url;
+        const record = await getAnalysisState(
+            tab.id, key, placeInfo && placeInfo.restaurant_name
+        );
+
+        if (liveUpdateShown) {
+            return;
+        }
+
+        if (!record) {
+            showCachedAnalysis(tab, placeInfo);
+            return;
+        }
+
+        if (record.status === 'done' && record.result && record.result.analysis) {
+            displayPageAnalysis(record.result.analysis, false);
+            return;
+        }
+
+        if (record.status === 'error') {
+            displayError(record.error || 'Analysis failed. Please try again.');
+            return;
+        }
+
+        // Still running. The deadline is measured from when the analysis
+        // started, not from now — otherwise every reopen would grant it
+        // another two minutes, and a spinner restored for an analysis that
+        // died with its worker would hang forever.
+        const remaining = record.startedAt + ANALYSIS_TIMEOUT_MS - Date.now();
+        if (remaining <= 0) {
+            displayError('Analysis timed out. Please try again.');
+            return;
+        }
+
+        showLoading();
+        armAnalysisTimeout(remaining);
+    }
+
+    // Show the cached analysis for the active tab, if there is a usable one.
+    //
+    // `placeInfo` comes from the caller, which has already asked for it.
+    async function showCachedAnalysis(tab, placeInfo) {
+        if (await isDevMode()) {
+            return;
+        }
+
         // Must match the key background.js caches under (see cacheKeyFor).
         const cacheKey = placeInfo
             ? `menu:${placeInfo.place_key}_analysis`
@@ -287,8 +370,9 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    function triggerAnalysis() {
-        // Disable button and show loading
+    // The waiting state, shared by a freshly triggered analysis and one
+    // restored on open so the two are indistinguishable to the user.
+    function showLoading() {
         analyzeButton.disabled = true;
         analyzeButton.textContent = 'Analyzing...';
         loadingDiv.style.display = 'block';
@@ -296,6 +380,19 @@ document.addEventListener('DOMContentLoaded', function () {
         loadingDiv.textContent = 'Analyzing this page...';
         contentDiv.style.display = 'none';
         document.getElementById('menu-content').style.display = 'none';
+    }
+
+    function armAnalysisTimeout(ms) {
+        setTimeout(function () {
+            if (loadingDiv.style.display !== 'none') {
+                displayError('Analysis timed out. Please try again.');
+                resetButton();
+            }
+        }, ms);
+    }
+
+    function triggerAnalysis() {
+        showLoading();
 
         // Get current tab and trigger content extraction
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
@@ -317,12 +414,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.log('Analysis triggered successfully', response);
 
                 // Set a timeout in case the analysis takes too long.
-                setTimeout(function () {
-                    if (loadingDiv.style.display !== 'none') {
-                        displayError('Analysis timed out. Please try again.');
-                        resetButton();
-                    }
-                }, ANALYSIS_TIMEOUT_MS);
+                armAnalysisTimeout(ANALYSIS_TIMEOUT_MS);
             });
         });
     }
@@ -332,6 +424,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (message.type === 'PAGE_RESULT_FOR_POPUP') {
             console.log('Received analysis result:', message.result);
             if (message.result && message.result.analysis) {
+                liveUpdateShown = true;
                 displayPageAnalysis(message.result.analysis, false);
                 resetButton();
                 // Reload history to show the new analysis
@@ -339,6 +432,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         } else if (message.type === 'PAGE_ERROR_FOR_POPUP') {
             console.log('Received analysis error:', message.error);
+            liveUpdateShown = true;
             displayError(message.error || 'Analysis failed. Please try again.');
             resetButton();
         }

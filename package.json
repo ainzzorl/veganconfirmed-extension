@@ -6,7 +6,7 @@
   "scripts": {
     "extract": "node tools/extract_content.js",
     "check": "node tools/check_content_scripts.js",
-    "test": "node tools/check_content_scripts.js && node tools/check_extractor_ownership.js && node tools/check_place_key.js && node tools/check_menu_sections.js"
+    "test": "node tools/check_content_scripts.js && node tools/check_extractor_ownership.js && node tools/check_place_key.js && node tools/check_menu_sections.js && node tools/check_analysis_state.js"
   },
   "devDependencies": {
     "jsdom": "^24.1.0"

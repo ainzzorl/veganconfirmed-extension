@@ -92,9 +92,19 @@
   const NOISE_LINE_RE =
     /^(directions|save|nearby|send to phone|share|suggest an edit|add a (photo|label)|claim this business|write a review|all reviews|see photos|photos|street view|website|call|order online|reserve a table|add your business|report a problem)$/i;
 
+  // How long the chip waits for a verdict before giving up on one.
+  //
+  // Not a deadline for the analysis — the service worker owns that — but a
+  // watchdog for the answer never arriving at all, which happens if the worker
+  // is recycled mid-request. Without it the chip reads "Analyzing menu…"
+  // forever and `isAnalyzing` blocks every retry until the user navigates
+  // away. Set past the popup's own ceiling so the chip is the last to give up.
+  const CHIP_WATCHDOG_MS = 150000;
+
   let isAnalyzing = false;
   let chipEl = null;
   let lastPlaceKey = null;
+  let analysisWatchdog = null;
 
   // --- place identity ------------------------------------------------------
 
@@ -644,6 +654,26 @@
 
   // --- analysis flow -------------------------------------------------------
 
+  function armWatchdog() {
+    clearWatchdog();
+    analysisWatchdog = setTimeout(() => {
+      analysisWatchdog = null;
+      if (!isAnalyzing) {
+        return;
+      }
+      log("no verdict arrived, releasing the chip");
+      isAnalyzing = false;
+      setChipState("error");
+    }, CHIP_WATCHDOG_MS);
+  }
+
+  function clearWatchdog() {
+    if (analysisWatchdog !== null) {
+      clearTimeout(analysisWatchdog);
+      analysisWatchdog = null;
+    }
+  }
+
   async function triggerMenuAnalysis() {
     if (isAnalyzing) {
       log("menu analysis already in progress");
@@ -665,14 +695,19 @@
       });
       log("extracted menu payload", payload);
       chrome.runtime.sendMessage({ type: "PAGE_FOR_ANALYSIS", payload: payload });
+      armWatchdog();
       return { status: "analysis_triggered", extractor: "google_maps" };
     } catch (error) {
       console.error("Vegan Confirmed: menu extraction failed:", error);
       isAnalyzing = false;
       setChipState("error");
+      // The place is sent along so the background can file the failure under
+      // the same key the analysis would have been cached under, and a popup
+      // reopened afterwards sees it rather than an idle screen.
       chrome.runtime.sendMessage({
         type: "PAGE_EXTRACTION_FAILED",
         error: error.message,
+        place_id: getPlaceKey(),
       });
       return { status: "extraction_failed", error: error.message };
     }
@@ -732,6 +767,7 @@
     }
 
     lastPlaceKey = placeKey;
+    clearWatchdog();
     isAnalyzing = false;
 
     if (placeKey) {
@@ -781,6 +817,7 @@
       }
 
       if (message.type === "PAGE_ANALYSIS_DONE") {
+        clearWatchdog();
         isAnalyzing = false;
         setChipState("done", summarizeForChip(message.result && message.result.analysis));
         sendResponse({ status: "received" });
@@ -788,6 +825,7 @@
       }
 
       if (message.type === "PAGE_ANALYSIS_FAILED") {
+        clearWatchdog();
         isAnalyzing = false;
         setChipState("error");
         sendResponse({ status: "received" });

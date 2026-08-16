@@ -28,6 +28,14 @@ const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 // Cache configuration
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
+// How long an analysis record is kept before it is swept. Far longer than any
+// analysis: this reclaims records for tabs that were closed, not ones still
+// being read.
+const ANALYSIS_STATE_TTL = 60 * 60 * 1000;
+
+// The one message the popup shows for an analysis that came back empty.
+const ANALYSIS_FAILED_MESSAGE = 'Analysis failed or timed out';
+
 // Popup connection tracking
 let popupPort = null;
 
@@ -102,6 +110,107 @@ function getCachedAnalysis(url) {
 // same URL twice.
 function cacheKeyFor(payload) {
     return payload.place_id ? `menu:${payload.place_id}` : payload.url;
+}
+
+// --- analysis state ---------------------------------------------------------
+//
+// One record per tab describing the analysis that tab last started: running,
+// done, or failed. The popup is a view of this and keeps nothing of its own
+// that has to survive a close.
+//
+// It has to survive a close because the popup closes the moment the user
+// clicks anywhere else, and an analysis can run for two minutes. Without a
+// record, a reopened popup looks idle: no spinner for the request still in
+// flight, no result for the one that finished while it was shut.
+//
+// Session storage rather than local, for two reasons. These records are
+// worthless once the browser restarts — no analysis outlives it — and keeping
+// them out of storage.local leaves cleanupExpiredCache's strict
+// `_analysis`/`_cache_timestamp` pairing assumption intact.
+function analysisStateKey(tabId) {
+    return `analysis:${tabId}`;
+}
+
+// Callbacks rather than the promise form the whole way down, matching how
+// every other storage call here is written: `chrome.storage` answers a
+// callback in both browsers, but only returns a promise in one.
+//
+// A browser too old to have session storage at all simply keeps no records,
+// and the popup falls back to the cache as it did before.
+function setAnalysisState(tabId, record) {
+    return new Promise((resolve) => {
+        if (tabId === undefined || !chrome.storage.session) {
+            resolve();
+            return;
+        }
+        chrome.storage.session.set({ [analysisStateKey(tabId)]: record }, resolve);
+    });
+}
+
+// The record for a tab, but only if it still describes the page that tab is
+// showing.
+//
+// `key` is what the caller believes the tab's analysis would be cached under.
+// Comparing it to the record's key is the "did this tab navigate away since
+// the analysis started" test — a Maps place panel swaps places without a page
+// load, so a tab id alone says nothing about what is on screen.
+//
+// `name` is checked too where both sides have one, for the same reason
+// getCachedPageAnalysis checks it: a Maps URL can carry several place ids, and
+// showing one restaurant's menu under another's name is invisible without it.
+function getAnalysisState(tabId, key, name) {
+    return new Promise((resolve) => {
+        if (tabId === undefined || !chrome.storage.session) {
+            resolve(null);
+            return;
+        }
+
+        const stateKey = analysisStateKey(tabId);
+        chrome.storage.session.get([stateKey], (stored) => {
+            const record = stored[stateKey];
+
+            if (!record || record.key !== key) {
+                resolve(null);
+                return;
+            }
+
+            if (record.name && name && record.name !== name) {
+                console.warn(
+                    `Analysis record under ${key} is for "${record.name}" but this ` +
+                    `page is "${name}". Ignoring it.`
+                );
+                resolve(null);
+                return;
+            }
+
+            resolve(record);
+        });
+    });
+}
+
+// Drop records left behind by tabs that have since closed.
+//
+// Rides along with the cache sweep rather than justifying a tabs.onRemoved
+// listener, which would wake the worker on every tab close to reclaim storage
+// that dies with the browser anyway.
+function cleanupAnalysisState() {
+    if (!chrome.storage.session) {
+        return;
+    }
+
+    chrome.storage.session.get(null, (all) => {
+        const now = Date.now();
+        const stale = Object.keys(all).filter(key =>
+            key.startsWith('analysis:') &&
+            now - (all[key].finishedAt || all[key].startedAt || 0) > ANALYSIS_STATE_TTL
+        );
+
+        if (stale.length > 0) {
+            chrome.storage.session.remove(stale, () => {
+                console.log(`Cleaned up ${stale.length} stale analysis records`);
+            });
+        }
+    });
 }
 
 // Function to store analysis result in cache
@@ -309,12 +418,40 @@ function applyAnalysisOutcome(analysis) {
     }
 }
 
+// Analyses currently in flight, keyed the way the cache is.
+//
+// This is the only place the backend is called, so one map covers every
+// trigger: the popup button, the Maps chip, an add-to-cart click. It matters
+// most for a popup reopened mid-analysis, which cannot see the request it
+// started and would otherwise pay for the same answer a second time.
+//
+// Per worker generation and deliberately not persisted — a promise from a
+// worker that no longer exists cannot be joined. The durable half of the guard
+// is the `running` record, which keeps the popup from offering the button.
+const inFlight = new Map();
+
 // Function to send a page to the backend for analysis
 //
 // One path for every page. Which extractor produced the payload (the generic
 // one in content.js or the Maps panel reader in maps.js) only affects how it
 // is keyed and labelled — the analysis itself is the same request.
-async function sendPageAnalysis(payload) {
+function sendPageAnalysis(payload) {
+    const key = cacheKeyFor(payload);
+
+    const running = inFlight.get(key);
+    if (running) {
+        console.log(`Joining analysis already in flight for: ${key}`);
+        return running;
+    }
+
+    const analysis = runPageAnalysis(payload).finally(() => {
+        inFlight.delete(key);
+    });
+    inFlight.set(key, analysis);
+    return analysis;
+}
+
+async function runPageAnalysis(payload) {
     try {
         console.log('Sending page for AI analysis:', payload.url);
 
@@ -466,12 +603,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
     }
 
+    // A reopened popup asks what its tab is doing. Answered from the record
+    // rather than from `inFlight`, so it survives the worker being recycled.
+    if (message.type === 'GET_ANALYSIS_STATE') {
+        getAnalysisState(message.tabId, message.key, message.name).then(record => {
+            sendResponse({ record: record });
+        });
+        return true; // response is async
+    }
+
     if (message.type === 'PAGE_FOR_ANALYSIS') {
         console.log('Received page for analysis:', message.payload?.url);
 
         const tabId = sender.tab?.id;
+        const key = cacheKeyFor(message.payload);
+        const startedAt = Date.now();
+
+        // The place this was built for, carried so a reader can check the
+        // record really belongs to the place on screen (see getAnalysisState).
+        const name = message.payload?.restaurant_name;
+
+        // Recorded before the request goes out, not after it comes back: the
+        // whole point is to be there for a popup that opens while it runs.
+        setAnalysisState(tabId, {
+            status: 'running',
+            key: key,
+            name: name,
+            startedAt: startedAt
+        });
 
         sendPageAnalysis(message.payload).then(result => {
+            setAnalysisState(tabId, result
+                ? {
+                    status: 'done',
+                    key: key,
+                    name: name,
+                    startedAt: startedAt,
+                    finishedAt: Date.now(),
+                    result: result
+                }
+                : {
+                    status: 'error',
+                    key: key,
+                    name: name,
+                    startedAt: startedAt,
+                    finishedAt: Date.now(),
+                    error: ANALYSIS_FAILED_MESSAGE
+                });
+
             // The Maps chip lives in the content script, so the originating tab
             // is told the outcome as well as the popup. Pages without a chip
             // simply have no listener for it.
@@ -485,10 +664,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
             }
 
+            // Best effort: with the popup shut there is nobody listening, and
+            // the record above is what the next open reads instead.
             chrome.runtime.sendMessage(
                 result
                     ? { type: 'PAGE_RESULT_FOR_POPUP', result: result }
-                    : { type: 'PAGE_ERROR_FOR_POPUP', error: 'Analysis failed or timed out' }
+                    : { type: 'PAGE_ERROR_FOR_POPUP', error: ANALYSIS_FAILED_MESSAGE }
             ).catch(error => {
                 console.log('Could not send result to popup:', error);
             });
@@ -498,9 +679,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'PAGE_EXTRACTION_FAILED') {
         console.log('Page extraction failed:', message.error);
 
+        const error = message.error || 'Could not read the content on this page';
+
+        // Extraction fails within a second of the trigger, so the popup is
+        // almost always still open to hear it — but it is recorded like any
+        // other outcome so a reopen does not show a blank, idle popup.
+        setAnalysisState(sender.tab?.id, {
+            status: 'error',
+            key: cacheKeyFor({ place_id: message.place_id, url: sender.tab?.url }),
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            error: error
+        });
+
         chrome.runtime.sendMessage({
             type: 'PAGE_ERROR_FOR_POPUP',
-            error: message.error || 'Could not read the content on this page'
+            error: error
         }).catch(error => {
             console.log('Could not send error to popup:', error);
         });
@@ -512,6 +706,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 
-// Clean up expired cache on startup and every hour
-cleanupExpiredCache();
-setInterval(cleanupExpiredCache, 60 * 60 * 1000); // Every hour
+// Clean up expired cache and stale analysis records on startup and every hour
+function runCleanup() {
+    cleanupExpiredCache();
+    cleanupAnalysisState();
+}
+
+runCleanup();
+setInterval(runCleanup, 60 * 60 * 1000); // Every hour
+
+// Expose helpers to Node-based tooling/tests (no-op in a browser).
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        cacheKeyFor,
+        analysisStateKey
+    };
+}
