@@ -25,6 +25,9 @@ const BACKEND_URL = DEV_MODE ? LOCAL_BACKEND_URL : PROD_BACKEND_URL;
 // kept as a second copy here, so bumping the manifest is the only step.
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
+// Key under which the installation ID lives in storage.local.
+const INSTALLATION_ID_KEY = 'installation_id';
+
 // Cache configuration
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
@@ -451,6 +454,34 @@ function sendPageAnalysis(payload) {
     return analysis;
 }
 
+// Identifies this installation to the backend, so calls can be grouped without
+// leaning on the client IP. Minted on first analysis rather than on install, so
+// installations predating this field get one too.
+//
+// It is not an identity: a reinstall, a new browser profile, or clearing the
+// extension's data all produce a fresh ID, and nothing stops a caller sending
+// whatever it likes. Fine for grouping and rough counts, not for anything that
+// has to be trusted.
+let installationIdPromise = null;
+
+function getInstallationId() {
+    if (!installationIdPromise) {
+        installationIdPromise = new Promise((resolve) => {
+            chrome.storage.local.get([INSTALLATION_ID_KEY], (result) => {
+                const existing = result[INSTALLATION_ID_KEY];
+                if (existing) {
+                    resolve(existing);
+                    return;
+                }
+
+                const id = crypto.randomUUID();
+                chrome.storage.local.set({ [INSTALLATION_ID_KEY]: id }, () => resolve(id));
+            });
+        });
+    }
+    return installationIdPromise;
+}
+
 async function runPageAnalysis(payload) {
     try {
         console.log('Sending page for AI analysis:', payload.url);
@@ -470,11 +501,14 @@ async function runPageAnalysis(payload) {
             });
         });
 
+        const installationId = await getInstallationId();
+
         // Add avoided ingredients to the payload for analysis
         const payloadWithSettings = {
             ...payload,
             user_avoided_ingredients: avoidedIngredients,
-            extension_version: EXTENSION_VERSION
+            extension_version: EXTENSION_VERSION,
+            installation_id: installationId
         };
 
         console.log(`Analyzing against ${BACKEND_URL}`);
