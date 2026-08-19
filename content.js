@@ -570,6 +570,40 @@ function isMapsPlacePage() {
   return /\/maps\/place\//.test(window.location.pathname);
 }
 
+// Paid placements. An anchor carrying rel="sponsored" is a declared paid link,
+// and a real add-to-cart button never lives inside one — but an ad creative
+// labelled "Buy Now" is a routine thing to serve into such a slot, on a page
+// that sells nothing. Rotating creatives are why the same article page can
+// trigger analysis again and again.
+const SPONSORED_CONTAINER_SELECTOR = 'a[target="_blank"][rel~="sponsored"]';
+
+function isSponsoredContent(element) {
+  return Boolean(element.closest?.(SPONSORED_CONTAINER_SELECTOR));
+}
+
+// Page kinds that cannot be a shopping item, taken from the page's own og:type.
+//
+// A blacklist, not a whitelist: most product pages declare nothing at all
+// (Amazon) or "website" (thredUP), so requiring a positive declaration would
+// silently drop real ones. Only kinds that rule a purchase out are listed —
+// "article" and "book" are deliberately absent, since product reviews and
+// bookshops are shopping intents that use them.
+const NON_SHOPPING_OG_TYPES = ["video", "music", "profile"];
+
+// The declared og:type when it names one of the kinds above, else null.
+function declaredNonShoppingKind() {
+  const meta = document.querySelector(
+    'meta[property="og:type"], meta[name="og:type"]'
+  );
+  const ogType = meta?.getAttribute("content")?.trim().toLowerCase();
+  if (!ogType) {
+    return null;
+  }
+  // "video.other", "music.song" — the kind is the part before the subtype.
+  const kind = ogType.split(".")[0];
+  return NON_SHOPPING_OG_TYPES.includes(kind) ? ogType : null;
+}
+
 // Function to detect "Add to Cart" buttons
 function detectAddToCartButtons() {
   let buttons = [];
@@ -655,7 +689,7 @@ function detectAddToCartButtons() {
           text === pattern || ariaLabel === pattern || title === pattern
       );
 
-      if (!shouldExclude) {
+      if (!shouldExclude && !isSponsoredContent(button)) {
         buttons.push(button);
       }
     }
@@ -749,6 +783,16 @@ function handleAddToCartClick(event) {
   // Prevent multiple simultaneous analyses
   if (isAnalyzing) {
     log("Analysis already in progress, skipping...");
+    return;
+  }
+
+  // Read at click time, not at setup: a single-page app swaps its og:type as
+  // the user navigates, and this is the only moment the answer has to be right.
+  const nonShoppingKind = declaredNonShoppingKind();
+  if (nonShoppingKind) {
+    log(
+      `Vegan Confirmed: page declares og:type="${nonShoppingKind}" - skipping automatic analysis`
+    );
     return;
   }
 
@@ -913,6 +957,8 @@ if (typeof module !== "undefined" && module.exports) {
     elementToMarkdown,
     cleanMarkdown,
     detectAddToCartButtons,
+    isSponsoredContent,
+    declaredNonShoppingKind,
     buildElementSelector,
     isMapsPlacePage,
     isPdfDocument,
