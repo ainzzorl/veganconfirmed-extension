@@ -71,6 +71,15 @@ document.addEventListener('DOMContentLoaded', function () {
     // failure to carry the error message.
     let analysisPending = false;
 
+    // The pending deadline, and a count of the analyses this popup has shown.
+    //
+    // One deadline at a time, dropped as soon as the analysis it guards is
+    // over or replaced. The popup stays open across several runs, and a
+    // restored deadline is measured from a run that started before it opened,
+    // so a timer left armed ends whichever analysis is waiting when it fires.
+    let analysisTimer = null;
+    let analysisGeneration = 0;
+
     // Setup tab functionality
     setupTabs();
 
@@ -299,6 +308,11 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
+        // Asking the tab and the worker takes a moment, and the user can click
+        // Analyze inside it. What comes back then describes the run before
+        // theirs, whose result and deadline are not theirs to wear.
+        const generation = analysisGeneration;
+
         const placeInfo = await getPlaceInfo(tab);
         // Must match the key background.js works in (see cacheKeyFor).
         const key = placeInfo ? `menu:${placeInfo.place_key}` : tab.url;
@@ -306,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
             tab.id, key, placeInfo && placeInfo.restaurant_name
         );
 
-        if (liveUpdateShown) {
+        if (liveUpdateShown || analysisGeneration !== generation) {
             return;
         }
 
@@ -379,6 +393,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // restored on open so the two are indistinguishable to the user.
     function showLoading() {
         analysisPending = true;
+        analysisGeneration += 1;
+        clearAnalysisTimeout();
         analyzeButton.disabled = true;
         analyzeButton.textContent = 'Analyzing...';
         loadingDiv.style.display = 'block';
@@ -389,12 +405,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function armAnalysisTimeout(ms) {
-        setTimeout(function () {
+        clearAnalysisTimeout();
+        analysisTimer = setTimeout(function () {
+            analysisTimer = null;
             if (analysisPending) {
                 displayError('Analysis timed out. Please try again.');
                 resetButton();
             }
         }, ms);
+    }
+
+    function clearAnalysisTimeout() {
+        if (analysisTimer !== null) {
+            clearTimeout(analysisTimer);
+            analysisTimer = null;
+        }
     }
 
     function triggerAnalysis() {
@@ -449,6 +474,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // when there is a result to show instead.
     function resetButton() {
         analysisPending = false;
+        clearAnalysisTimeout();
         analyzeButton.disabled = false;
         analyzeButton.textContent = BUTTON_LABEL;
     }
