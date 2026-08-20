@@ -7,7 +7,7 @@
     "extract": "node tools/extract_content.js",
     "extract-pdf": "node tools/extract_pdf.js",
     "check": "node tools/check_content_scripts.js",
-    "test": "node tools/check_content_scripts.js && node tools/check_extractor_ownership.js && node tools/check_place_key.js && node tools/check_menu_sections.js && node tools/check_data_payload_menu.js && node tools/check_analysis_state.js && node tools/check_auto_analysis_gate.js"
+    "test": "node tools/check_content_scripts.js && node tools/check_extractor_ownership.js && node tools/check_place_key.js && node tools/check_menu_sections.js && node tools/check_data_payload_menu.js && node tools/check_analysis_state.js && node tools/check_auto_analysis_gate.js && node tools/check_popup_error_display.js"
   },
   "devDependencies": {
     "jsdom": "^24.1.0",

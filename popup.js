@@ -66,6 +66,11 @@ document.addEventListener('DOMContentLoaded', function () {
     // path stands down when it is set.
     let liveUpdateShown = false;
 
+    // Whether an analysis is still waiting on an outcome. The timeout reads
+    // this rather than the loading element, which stays on screen after a
+    // failure to carry the error message.
+    let analysisPending = false;
+
     // Setup tab functionality
     setupTabs();
 
@@ -373,6 +378,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // The waiting state, shared by a freshly triggered analysis and one
     // restored on open so the two are indistinguishable to the user.
     function showLoading() {
+        analysisPending = true;
         analyzeButton.disabled = true;
         analyzeButton.textContent = 'Analyzing...';
         loadingDiv.style.display = 'block';
@@ -384,7 +390,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function armAnalysisTimeout(ms) {
         setTimeout(function () {
-            if (loadingDiv.style.display !== 'none') {
+            if (analysisPending) {
                 displayError('Analysis timed out. Please try again.');
                 resetButton();
             }
@@ -438,10 +444,13 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    // Puts the button back; deliberately leaves the loading element alone. It
+    // is where an error is shown, and the display functions hide it themselves
+    // when there is a result to show instead.
     function resetButton() {
+        analysisPending = false;
         analyzeButton.disabled = false;
         analyzeButton.textContent = BUTTON_LABEL;
-        loadingDiv.style.display = 'none';
     }
 
     function displayError(message) {
