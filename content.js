@@ -378,6 +378,107 @@ function extractDataPayloadItems(visibleMarkdown) {
   return renderDataRecords(records);
 }
 
+// What the page declares about its own kind, forwarded to the backend as
+// `page_signals`.
+//
+// Facts only, never a verdict: which og:type the page names, and which
+// schema.org types its JSON-LD and microdata carry. Every rule written against
+// them lives on the server (services/page_scope.py), where it can be changed
+// without shipping an extension release — so this side stays a bounded reader
+// that decides nothing.
+const SIGNAL_LD_SELECTOR = 'script[type="application/ld+json"]';
+
+// A page declaring more than this has a graph describing its whole site rather
+// than itself, and the rules read a handful of types at most.
+const MAX_SCHEMA_TYPES = 40;
+const MAX_SCHEMA_TYPE_CHARS = 60;
+
+// `@type` is a string or an array of them, and may be written as a full
+// schema.org URL. The bare name is what the server matches on.
+function addSchemaTypes(types, value) {
+  for (const entry of Array.isArray(value) ? value : [value]) {
+    if (typeof entry !== "string" || types.size >= MAX_SCHEMA_TYPES) {
+      continue;
+    }
+    const name = entry.trim().replace(/\/$/, "").split("/").pop();
+    if (name && name.length <= MAX_SCHEMA_TYPE_CHARS) {
+      types.add(name);
+    }
+  }
+}
+
+// Every `@type` in the page's JSON-LD, plus the ones its microdata names.
+// Bounded the same way the data-payload mining is: a hydration graph is
+// arbitrary structure of arbitrary size.
+function collectSchemaTypes() {
+  const types = new Set();
+  let nodes = 0;
+
+  const visit = (value, depth) => {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      depth > MAX_PAYLOAD_DEPTH ||
+      nodes >= MAX_PAYLOAD_NODES ||
+      types.size >= MAX_SCHEMA_TYPES
+    ) {
+      return;
+    }
+    nodes += 1;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, depth + 1);
+      }
+      return;
+    }
+    addSchemaTypes(types, value["@type"]);
+    for (const child of Object.values(value)) {
+      visit(child, depth + 1);
+    }
+  };
+
+  for (const script of document.querySelectorAll(SIGNAL_LD_SELECTOR)) {
+    const raw = script.textContent;
+    if (!raw || raw.length > MAX_PAYLOAD_CHARS) {
+      continue;
+    }
+    try {
+      visit(JSON.parse(raw), 0);
+    } catch (e) {
+      // A malformed block says nothing; the rest of the page still does.
+    }
+  }
+
+  // Microdata is the older way of declaring the same thing, and plenty of shop
+  // templates still use it instead of JSON-LD.
+  for (const element of document.querySelectorAll("[itemtype]")) {
+    if (types.size >= MAX_SCHEMA_TYPES) {
+      break;
+    }
+    addSchemaTypes(types, element.getAttribute("itemtype"));
+  }
+
+  return [...types];
+}
+
+// The page's declared og:type, or null.
+function declaredOgType() {
+  const meta = document.querySelector(
+    'meta[property="og:type"], meta[name="og:type"]'
+  );
+  return meta?.getAttribute("content")?.trim().toLowerCase() || null;
+}
+
+// Null when the page declares nothing, so the field is absent rather than empty.
+function collectPageSignals() {
+  const ogType = declaredOgType();
+  const schemaTypes = collectSchemaTypes();
+  if (!ogType && !schemaTypes.length) {
+    return null;
+  }
+  return { og_type: ogType, schema_types: schemaTypes };
+}
+
 // Function to extract clean text content from the current page for AI analysis
 function extractPageContent(
   triggerType = "manual",
@@ -443,6 +544,10 @@ function extractPageContent(
     timestamp: new Date().toISOString(),
     content,
     language: getPageLanguage(),
+    // Read here rather than at page load: a single-page app rewrites its own
+    // metadata as it navigates, so the declaration has to be taken in the same
+    // pass as the content it describes.
+    page_signals: collectPageSignals(),
     source: "page",
     trigger_type: triggerType,
     trigger_element_text: triggerElementText,
@@ -592,10 +697,7 @@ const NON_SHOPPING_OG_TYPES = ["video", "music", "profile"];
 
 // The declared og:type when it names one of the kinds above, else null.
 function declaredNonShoppingKind() {
-  const meta = document.querySelector(
-    'meta[property="og:type"], meta[name="og:type"]'
-  );
-  const ogType = meta?.getAttribute("content")?.trim().toLowerCase();
+  const ogType = declaredOgType();
   if (!ogType) {
     return null;
   }
@@ -954,6 +1056,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractPageContent,
     extractDataPayloadItems,
+    collectPageSignals,
     elementToMarkdown,
     cleanMarkdown,
     detectAddToCartButtons,
