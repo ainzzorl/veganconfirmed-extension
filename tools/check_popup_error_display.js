@@ -36,7 +36,7 @@ const messageListeners = [];
 // Whatever the popup asks the worker for. Nothing here is running or cached,
 // so the popup opens idle and the user triggers the analysis themselves.
 function answer(message) {
-  if (message.type === "GET_DEV_MODE") return { dev_mode: false };
+  if (message.type === "GET_CACHE_ENABLED") return { cache_enabled: true };
   if (message.type === "GET_ANALYSIS_STATE") return { record: null };
   return { status: "received" };
 }

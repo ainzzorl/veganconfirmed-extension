@@ -89,7 +89,7 @@ async function openPopup({ state = null, holdState = false } = {}) {
       connect: () => ({ onDisconnect: { addListener() {} } }),
       sendMessage: (message, cb) => {
         if (!cb) return;
-        if (message.type === "GET_DEV_MODE") return cb({ dev_mode: false });
+        if (message.type === "GET_CACHE_ENABLED") return cb({ cache_enabled: true });
         if (message.type === "GET_ANALYSIS_STATE") {
           if (holdState) {
             releaseState = () => cb({ record: state });

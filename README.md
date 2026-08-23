@@ -54,24 +54,27 @@ Firefox is a known gap: it renders PDFs in a privileged `resource://` viewer
 where content scripts do not run, so the popup falls back to its generic
 "Could not analyze this page".
 
-## Local testing mode
+## Local testing flags
 
-Set `DEV_MODE = true` at the top of `background.js` to test against a backend
-running on this machine (`http://localhost:5555`, the backend's default port),
-then reload the extension. Set it back to `false` before packaging — it ships
-as `false`, so a normal build always talks to production.
+Two independent flags at the top of `background.js`, both meant to be flipped
+while testing and set back before packaging:
 
-Caching is disabled along with the endpoint on purpose. Analyses are cached per
-URL (and per place, for menus) for 24 hours, so without it the first response
-for a page would be the only one the extension ever asks for — a prompt or
-backend change would appear to do nothing until the next day. In this mode
-nothing is read from or written to the cache; History is still recorded, and
-cache entries written in normal mode are left untouched.
+- `USE_LOCAL_BACKEND` — send requests to a backend running on this machine
+  (`http://localhost:5555`, the backend's default port) instead of production.
+  It ships as `false`, so a normal build always talks to production.
+- `CACHE_ENABLED` — read and write the analysis cache. It ships as `true`.
 
-`background.js` is the only place the flag is defined. `popup.js` needs it too,
-because it reads cached analyses out of storage directly to show a result as
-soon as it opens, and it asks for the value over a `GET_DEV_MODE` message
-rather than keeping a second copy to forget to flip.
+Turn `CACHE_ENABLED` off whenever a prompt or backend change has to be visible.
+Analyses are cached per URL (and per place, for menus) for 24 hours, so with it
+on, the first response for a page is the only one the extension ever asks for
+and a change appears to do nothing until the next day. With it off nothing is
+read from or written to the cache; History is still recorded, and cache entries
+written earlier are left untouched.
+
+`background.js` is the only place the flags are defined. `popup.js` needs
+`CACHE_ENABLED` too, because it reads cached analyses out of storage directly
+to show a result as soon as it opens, and it asks for the value over a
+`GET_CACHE_ENABLED` message rather than keeping a second copy to forget to flip.
 
 ### Notes on the Google Maps integration
 

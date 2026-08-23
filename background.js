@@ -1,24 +1,31 @@
 // Add logging to verify script loading
 console.log('Background script loaded');
 
-// Local testing mode — flip to true while testing against a backend running on
-// this machine, and back to false before packaging.
+// Local testing flags — flip while testing, and back before packaging.
 //
-// It does two things: requests go to LOCAL_BACKEND_URL, and analyses are
-// neither read from nor written to the cache. Without the second part a local
-// run is nearly untestable — the first response for a URL is the only one the
-// extension ever asks for, so a prompt or backend change appears to have no
-// effect for the next 24 hours.
+// Two independent switches, because the two things they control are wanted at
+// different times:
 //
-// This is the single source of truth for the flag. popup.js needs it too (it
-// reads cached analyses directly) and asks for it over GET_DEV_MODE rather than
-// keeping a copy that could drift out of sync with this one.
-const DEV_MODE = false;
+//   USE_LOCAL_BACKEND — send requests to LOCAL_BACKEND_URL instead of the
+//   production API.
+//
+//   CACHE_ENABLED — read and write analyses in the cache. Turning it off is
+//   what makes a backend or prompt change testable at all: analyses are cached
+//   for 24 hours, so with the cache on, the first response for a URL is the
+//   only one the extension ever asks for and a change appears to do nothing
+//   until the next day. Left on by default, since that is what a normal build
+//   wants.
+//
+// This is the single source of truth for both. popup.js needs CACHE_ENABLED
+// too (it reads cached analyses directly) and asks for it over
+// GET_CACHE_ENABLED rather than keeping a copy that could drift out of sync.
+const USE_LOCAL_BACKEND = true;
+const CACHE_ENABLED = true;
 
 // Backend API configuration
 const PROD_BACKEND_URL = 'https://api.veganconfirmed.com';
 const LOCAL_BACKEND_URL = 'http://localhost:5555';
-const BACKEND_URL = DEV_MODE ? LOCAL_BACKEND_URL : PROD_BACKEND_URL;
+const BACKEND_URL = USE_LOCAL_BACKEND ? LOCAL_BACKEND_URL : PROD_BACKEND_URL;
 
 // The extension version, sent with every analysis request so the backend can
 // record which version a call came from. Read from the manifest rather than
@@ -84,8 +91,8 @@ function isCacheValid(timestamp) {
 
 // Function to get cached analysis result
 function getCachedAnalysis(url) {
-    if (DEV_MODE) {
-        console.log(`Cache BYPASSED (local testing mode) for URL: ${url}`);
+    if (!CACHE_ENABLED) {
+        console.log(`Cache BYPASSED (caching disabled) for URL: ${url}`);
         return Promise.resolve(null);
     }
 
@@ -218,9 +225,9 @@ function cleanupAnalysisState() {
 
 // Function to store analysis result in cache
 //
-// In local testing mode the cache entry is skipped but history is still
-// written: history is a record of what was analyzed, not a source results are
-// served from, and it is useful while testing.
+// With caching off the cache entry is skipped but history is still written:
+// history is a record of what was analyzed, not a source results are served
+// from, and it is useful while testing.
 //
 // For a place-keyed entry the place it was built for is recorded *inside* the
 // cached value so a reader can verify the entry really belongs to the place on
@@ -232,8 +239,8 @@ function storeCachedAnalysis(payload, analysisResult) {
     const timestamp = Date.now();
     const cacheKey = cacheKeyFor(payload);
 
-    if (DEV_MODE) {
-        console.log(`Not caching analysis (local testing mode) for: ${cacheKey}`);
+    if (!CACHE_ENABLED) {
+        console.log(`Not caching analysis (caching disabled) for: ${cacheKey}`);
     } else {
         const value = payload.place_id
             ? {
@@ -631,9 +638,9 @@ function cleanupExpiredCache() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Message received:', message);
 
-    // The popup asks for DEV_MODE so the flag stays defined in one place.
-    if (message.type === 'GET_DEV_MODE') {
-        sendResponse({ dev_mode: DEV_MODE });
+    // The popup asks for CACHE_ENABLED so the flag stays defined in one place.
+    if (message.type === 'GET_CACHE_ENABLED') {
+        sendResponse({ cache_enabled: CACHE_ENABLED });
         return;
     }
 

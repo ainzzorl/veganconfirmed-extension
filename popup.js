@@ -8,17 +8,18 @@ function sanitizeHTML(text) {
     return div.innerHTML;
 }
 
-// Local testing mode, defined by DEV_MODE in background.js and asked for here
-// rather than duplicated. The popup reads cached analyses straight out of
-// storage to show a result the moment it opens, so it has to honour the same
-// cache bypass — otherwise a stale result would appear while testing even
-// though the background never serves one.
-function isDevMode() {
+// Whether caching is on, defined by CACHE_ENABLED in background.js and asked
+// for here rather than duplicated. The popup reads cached analyses straight out
+// of storage to show a result the moment it opens, so it has to honour the same
+// bypass — otherwise a stale result would appear while testing even though the
+// background never serves one.
+function isCacheEnabled() {
     return new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_DEV_MODE' }, function (response) {
-            // On error (worker not up yet) assume normal mode: showing a cached
-            // result is the harmless direction to fail in.
-            resolve(!chrome.runtime.lastError && response && response.dev_mode === true);
+        chrome.runtime.sendMessage({ type: 'GET_CACHE_ENABLED' }, function (response) {
+            // On error (worker not up yet) assume caching is on: showing a
+            // cached result is the harmless direction to fail in.
+            resolve(Boolean(chrome.runtime.lastError) || !response ||
+                response.cache_enabled !== false);
         });
     });
 }
@@ -301,8 +302,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // for the same result, and reopening afterwards shows it.
     //
     // A finished record is preferred over the cache because it is the one
-    // source that is right in every mode — in DEV_MODE nothing is cached at
-    // all, and a reopened popup would otherwise show nothing.
+    // source that is right in every mode — with caching off nothing is cached
+    // at all, and a reopened popup would otherwise show nothing.
     async function restoreAnalysisState(tab) {
         if (!tab) {
             return;
@@ -357,7 +358,7 @@ document.addEventListener('DOMContentLoaded', function () {
     //
     // `placeInfo` comes from the caller, which has already asked for it.
     async function showCachedAnalysis(tab, placeInfo) {
-        if (await isDevMode()) {
+        if (!(await isCacheEnabled())) {
             return;
         }
 
