@@ -105,7 +105,7 @@ assert.strictEqual(loading.style.display, "block");
 
 deliver({
   type: "PAGE_RESULT_FOR_POPUP",
-  result: { analysis: { page_kind: "other", explanation: "Nothing to check." } },
+  result: { analysis: { page_kind: "other", summary: "Nothing to check." } },
 });
 
 assert.strictEqual(

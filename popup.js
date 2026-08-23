@@ -517,10 +517,9 @@ function displayOtherAnalysis(analysis) {
 
     document.getElementById('confidence').textContent = '';
 
-    const explanationElement = document.getElementById('explanation');
-    explanationElement.className = 'explanation';
-    explanationElement.textContent = analysis.explanation ||
-        analysis.summary ||
+    const summaryElement = document.getElementById('pageSummary');
+    summaryElement.className = 'explanation';
+    summaryElement.textContent = analysis.summary ||
         'There is nothing on this page to check.';
 
     document.getElementById('avoided-ingredients').style.display = 'none';
@@ -529,7 +528,7 @@ function displayOtherAnalysis(analysis) {
 
 function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     // The product verdict and its confidence live on the shopping_item branch;
-    // explanation, summary and the avoid-list hits stay on the analysis itself.
+    // the summary and the avoid-list hits stay on the analysis itself.
     const item = analysis.shopping_item || {};
 
     // Hide loading, show content
@@ -596,14 +595,14 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
         ? `Confidence: ${item.confidence_level.toUpperCase()}`
         : '';
 
-    // Display explanation
-    const explanationElement = document.getElementById('explanation');
-    if (analysis.explanation) {
-        explanationElement.textContent = analysis.explanation;
-        explanationElement.className = 'explanation';
+    // Display summary
+    const summaryElement = document.getElementById('pageSummary');
+    if (analysis.summary) {
+        summaryElement.textContent = analysis.summary;
+        summaryElement.className = 'explanation';
     } else {
-        explanationElement.textContent = 'No explanation available';
-        explanationElement.className = 'explanation error';
+        summaryElement.textContent = 'No summary available';
+        summaryElement.className = 'explanation error';
     }
 
     // Display avoided ingredients if present

@@ -20,7 +20,7 @@ console.log('Background script loaded');
 // too (it reads cached analyses directly) and asks for it over
 // GET_CACHE_ENABLED rather than keeping a copy that could drift out of sync.
 const USE_LOCAL_BACKEND = true;
-const CACHE_ENABLED = true;
+const CACHE_ENABLED = false;
 
 // Backend API configuration
 const PROD_BACKEND_URL = 'https://api.veganconfirmed.com';
@@ -303,7 +303,6 @@ function saveToAnalysisHistory(cacheKey, analysisResult, timestamp, payload) {
                 'Unknown Page',
             confidence_level: item.confidence_level,
             summary: clip(analysis.summary, 150),
-            explanation: clip(analysis.explanation, 150),
             user_avoided_ingredients: analysis.user_avoided_ingredients || []
         };
 

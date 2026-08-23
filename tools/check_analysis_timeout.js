@@ -140,7 +140,7 @@ async function openPopup({ state = null, holdState = false } = {}) {
   advance(20000);
   popup.deliver({
     type: "PAGE_RESULT_FOR_POPUP",
-    result: { analysis: { page_kind: "other", explanation: "Nothing to check." } },
+    result: { analysis: { page_kind: "other", summary: "Nothing to check." } },
   });
 
   // The user reads the verdict, then asks for another analysis well inside the
@@ -195,7 +195,7 @@ async function openPopup({ state = null, holdState = false } = {}) {
   // The new analysis's own result is still welcome.
   popup2.deliver({
     type: "PAGE_RESULT_FOR_POPUP",
-    result: { analysis: { page_kind: "other", explanation: "Nothing to check." } },
+    result: { analysis: { page_kind: "other", summary: "Nothing to check." } },
   });
   assert.strictEqual(popup2.loading.style.display, "none");
   assert.strictEqual(popup2.button.disabled, false);
