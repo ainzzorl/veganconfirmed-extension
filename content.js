@@ -381,11 +381,12 @@ function extractDataPayloadItems(visibleMarkdown) {
 // What the page declares about its own kind, forwarded to the backend as
 // `page_signals`.
 //
-// Facts only, never a verdict: which og:type the page names, and which
-// schema.org types its JSON-LD and microdata carry. Every rule written against
-// them lives on the server (services/page_scope.py), where it can be changed
-// without shipping an extension release — so this side stays a bounded reader
-// that decides nothing.
+// Facts only, never a verdict: which og:type the page names, which schema.org
+// types its JSON-LD and microdata carry, and which third-party hosts it loads
+// from. Every rule written against them lives on the server
+// (services/page_scope.py), where it can be changed without shipping an
+// extension release — so this side stays a bounded reader that decides
+// nothing.
 const SIGNAL_LD_SELECTOR = 'script[type="application/ld+json"]';
 
 // A page declaring more than this has a graph describing its whole site rather
@@ -469,14 +470,56 @@ function declaredOgType() {
   return meta?.getAttribute("content")?.trim().toLowerCase() || null;
 }
 
+// Which third-party hosts the page loads its scripts, stylesheets and frames
+// from. A site built on a restaurant platform says so through them even when it
+// declares no schema at all, which is the common case on a restaurant's own
+// site. Anchors are left out: outbound links are noise, not what the page runs
+// on.
+const ASSET_HOST_SELECTOR = "script[src], link[href], iframe[src]";
+const MAX_ASSET_HOSTS = 40;
+const MAX_ASSET_ELEMENTS = 500;
+
+function collectAssetHosts() {
+  const own = window.location.hostname.toLowerCase();
+  const hosts = new Set();
+  let scanned = 0;
+
+  for (const element of document.querySelectorAll(ASSET_HOST_SELECTOR)) {
+    if (scanned >= MAX_ASSET_ELEMENTS || hosts.size >= MAX_ASSET_HOSTS) {
+      break;
+    }
+    scanned += 1;
+    const raw = element.getAttribute("src") || element.getAttribute("href");
+    if (!raw) {
+      continue;
+    }
+    let host;
+    try {
+      host = new URL(raw, window.location.href).hostname.toLowerCase();
+    } catch (e) {
+      continue;
+    }
+    if (host && host !== own) {
+      hosts.add(host);
+    }
+  }
+
+  return [...hosts];
+}
+
 // Null when the page declares nothing, so the field is absent rather than empty.
 function collectPageSignals() {
   const ogType = declaredOgType();
   const schemaTypes = collectSchemaTypes();
-  if (!ogType && !schemaTypes.length) {
+  const assetHosts = collectAssetHosts();
+  if (!ogType && !schemaTypes.length && !assetHosts.length) {
     return null;
   }
-  return { og_type: ogType, schema_types: schemaTypes };
+  return {
+    og_type: ogType,
+    schema_types: schemaTypes,
+    asset_hosts: assetHosts,
+  };
 }
 
 // Function to extract clean text content from the current page for AI analysis

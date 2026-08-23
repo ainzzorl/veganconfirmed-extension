@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 //
-// `page_signals` is what a page declares about its own kind — its og:type and
-// the schema.org types of its JSON-LD and microdata. The backend prunes the
+// `page_signals` is what a page declares about its own kind — its og:type, the
+// schema.org types of its JSON-LD and microdata, and the third-party hosts it
+// loads scripts, stylesheets and frames from. The backend prunes the
 // page-kind question with it (services/page_scope.py), so this side has one
 // job: report what the page says, faithfully and boundedly, without deciding
 // anything.
@@ -60,6 +61,22 @@ const MICRODATA_PRODUCT_PAGE = `<html><head></head><body>
 </body></html>`;
 
 const PLAIN_PAGE = `<html><head><title>About us</title></head><body>Hello.</body></html>`;
+
+// A restaurant's own site: nothing declared, everything loaded from the
+// platform it runs on. The outbound booking link is not part of that.
+const PLATFORM_PAGE = `<html><head>
+  <link rel="stylesheet" href="https://static.spotapps.co/site.css" />
+  <script src="/local/app.js"></script>
+  <script src="//www.googletagmanager.com/gtag/js"></script>
+</head><body>
+  <a href="https://www.opentable.com/restref/client/?restref=88333">Reserve</a>
+  <iframe src="https://tmt.spotapps.co/ordering-menu/"></iframe>
+</body></html>`;
+
+const MANY_HOSTS_PAGE = `<html><head>${Array.from(
+  { length: 120 },
+  (_, i) => `<script src="https://host${i}.example.com/a.js"></script>`
+).join("")}</head><body></body></html>`;
 
 const BROKEN_LD_PAGE = `<html><head>
   <meta property="og:type" content="product" />
@@ -128,6 +145,27 @@ const CHECKS = [
     "a site-wide graph cannot grow the payload without bound",
     () => {
       assert.strictEqual(signals(MANY_TYPES_PAGE).schema_types.length, 40);
+    },
+  ],
+  [
+    "the hosts a page loads from, minus its own and its outbound links",
+    () => {
+      const { asset_hosts: hosts, schema_types: types } = signals(
+        PLATFORM_PAGE,
+        "https://agavemxbistro.com/food-menu"
+      );
+      assert.deepStrictEqual(types, []);
+      assert.deepStrictEqual(hosts, [
+        "static.spotapps.co",
+        "www.googletagmanager.com",
+        "tmt.spotapps.co",
+      ]);
+    },
+  ],
+  [
+    "an ad-heavy page cannot grow the host list without bound",
+    () => {
+      assert.strictEqual(signals(MANY_HOSTS_PAGE).asset_hosts.length, 40);
     },
   ],
   [
