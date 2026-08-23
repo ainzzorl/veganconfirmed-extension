@@ -17,6 +17,12 @@ answers accordingly:
 - **Neither** — the popup says so plainly. Most of the web is neither, so this
   is a normal answer rather than an error.
 
+Every answer carries a 👍/👎 under it, with an optional comment box. The thumb
+goes to the backend the moment it is clicked, and a comment, if one is written,
+follows and merges onto the same record. Both refer to the `analysis_id` the
+backend returns alongside the analysis, so an answer it could not store shows
+no controls rather than dead ones.
+
 Two extractors feed that one analysis, and which one runs is the only thing the
 page's URL still decides:
 

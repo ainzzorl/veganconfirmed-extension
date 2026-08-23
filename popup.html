@@ -588,6 +588,83 @@
             background-color: #fafafa;
             color: #757575;
         }
+
+        /* Feedback styles */
+        .feedback {
+            border-top: 1px solid #eee;
+            padding-top: 12px;
+        }
+
+        .feedback-prompt {
+            display: inline-block;
+            font-size: 13px;
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .feedback-btn {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 3px 8px;
+            margin-right: 4px;
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1.4;
+            opacity: 0.6;
+        }
+
+        .feedback-btn:hover {
+            background-color: #f5f5f5;
+            opacity: 1;
+        }
+
+        .feedback-btn.selected {
+            border-color: #4CAF50;
+            background-color: #f1f8f2;
+            opacity: 1;
+        }
+
+        .feedback-comment-box {
+            margin-top: 8px;
+        }
+
+        .feedback-comment-box textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 54px;
+            resize: vertical;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .feedback-send-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 6px 14px;
+            margin-top: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .feedback-send-btn:hover {
+            background-color: #45a049;
+        }
+
+        .feedback-status {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .feedback-status.error {
+            color: #c62828;
+        }
     </style>
 </head>
 
@@ -634,6 +711,19 @@
             <div class="section">
                 <div id="menuItems"></div>
             </div>
+        </div>
+        <!-- Serves both panels above, so it also reaches the cases
+             displayMenuAnalysis returns early on: no menu, and no dishes. -->
+        <div id="feedback" class="section feedback" style="display: none;">
+            <span id="feedbackPrompt" class="feedback-prompt">Was this right?</span>
+            <button id="feedbackUp" class="feedback-btn" title="Yes">&#128077;</button>
+            <button id="feedbackDown" class="feedback-btn" title="No">&#128078;</button>
+            <div id="feedbackCommentBox" class="feedback-comment-box" style="display: none;">
+                <textarea id="feedbackComment" maxlength="2000"
+                    placeholder="Optional"></textarea>
+                <button id="feedbackSend" class="feedback-send-btn">Send</button>
+            </div>
+            <div id="feedbackStatus" class="feedback-status"></div>
         </div>
     </div>
 

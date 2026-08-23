@@ -442,6 +442,35 @@ function applyAnalysisOutcome(analysis) {
 // is the `running` record, which keeps the popup from offering the button.
 const inFlight = new Map();
 
+// Send a rating, and any comment with it, for one analysis.
+//
+// Deliberately carries no installation_id or extension version, unlike an
+// analysis request: the analysis being rated already records who asked for it,
+// and the rater is that same user.
+//
+// The rating goes as soon as a thumb is clicked and a comment, if the user
+// writes one, follows in a second call; the backend merges them onto the one
+// record.
+async function sendAnalysisFeedback(analysisId, rating, comment) {
+    const response = await fetch(`${BACKEND_URL}/api/feedback`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            analysis_id: analysisId,
+            rating: rating,
+            comment: comment || undefined
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    console.log(`Sent '${rating}' feedback for ${analysisId}`);
+}
+
 // Function to send a page to the backend for analysis
 //
 // One path for every page. Which extractor produced the payload (the generic
@@ -644,6 +673,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GET_CACHE_ENABLED') {
         sendResponse({ cache_enabled: CACHE_ENABLED });
         return;
+    }
+
+    // The popup's thumbs-up/down, and the comment that may follow it. Routed
+    // through here because the popup does not talk to the backend; it also
+    // means a popup closed the instant after a click does not cancel the call.
+    if (message.type === 'SEND_ANALYSIS_FEEDBACK') {
+        sendAnalysisFeedback(message.analysis_id, message.rating, message.comment)
+            .then(() => sendResponse({ ok: true }))
+            .catch(error => sendResponse({ ok: false, error: String(error) }));
+        return true; // response is async
     }
 
     // A reopened popup asks what its tab is doing. Answered from the record

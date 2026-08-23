@@ -331,7 +331,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (record.status === 'done' && record.result && record.result.analysis) {
-            displayPageAnalysis(record.result.analysis, false);
+            displayPageAnalysis(record.result.analysis, false, record.result.analysis_id);
             return;
         }
 
@@ -386,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
 
-            displayPageAnalysis(cached.analysis, false);
+            displayPageAnalysis(cached.analysis, false, cached.analysis_id);
         });
     }
 
@@ -403,6 +403,7 @@ document.addEventListener('DOMContentLoaded', function () {
         loadingDiv.textContent = 'Analyzing this page...';
         contentDiv.style.display = 'none';
         document.getElementById('menu-content').style.display = 'none';
+        hideFeedback();
     }
 
     function armAnalysisTimeout(ms) {
@@ -457,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log('Received analysis result:', message.result);
             if (message.result && message.result.analysis) {
                 liveUpdateShown = true;
-                displayPageAnalysis(message.result.analysis, false);
+                displayPageAnalysis(message.result.analysis, false, message.result.analysis_id);
                 resetButton();
                 // Reload history to show the new analysis
                 loadAnalysisHistory();
@@ -486,11 +487,17 @@ document.addEventListener('DOMContentLoaded', function () {
         loadingDiv.style.display = 'block';
         contentDiv.style.display = 'none';
         document.getElementById('menu-content').style.display = 'none';
+        hideFeedback();
     }
 });
 
 // Render an analysis of any page, dispatching on what the page turned out to be.
-function displayPageAnalysis(analysis, isWarningAnalysis = false) {
+//
+// `analysisId` is the backend's ID for this analysis, and is what feedback on
+// it refers to. It rides along on the response, so every path that kept the
+// whole response has one; the warning panel, which stores the analysis alone,
+// does not.
+function displayPageAnalysis(analysis, isWarningAnalysis = false, analysisId = null) {
     switch (resolvePageKind(analysis)) {
         case 'restaurant_menu':
             displayMenuAnalysis(analysis);
@@ -501,6 +508,142 @@ function displayPageAnalysis(analysis, isWarningAnalysis = false) {
         default:
             displayOtherAnalysis(analysis);
     }
+
+    // After the panel, so it sits below whichever one was drawn.
+    renderFeedback(analysisId);
+}
+
+// The analysis the feedback controls currently speak for, and whether their
+// listeners are on. Null whenever nothing rateable is on screen.
+let feedbackAnalysisId = null;
+let feedbackListenersAttached = false;
+
+// The rating the user has given this analysis, if any. Kept so a comment sent
+// afterwards carries it too — the backend stores one opinion per analysis.
+let feedbackRating = null;
+
+function hideFeedback() {
+    feedbackAnalysisId = null;
+    feedbackRating = null;
+    const section = document.getElementById('feedback');
+    if (section) {
+        section.style.display = 'none';
+    }
+}
+
+// Show the thumbs for one analysis, in their unrated state.
+//
+// Without an ID there is nothing to attach a rating to, so the controls are
+// hidden outright rather than shown dead: that covers a cache entry written
+// before the backend returned one, a record whose save failed, and the warning
+// panel. A thumb that silently does nothing is worse than no thumb.
+function renderFeedback(analysisId) {
+    const section = document.getElementById('feedback');
+    if (!section) {
+        return;
+    }
+
+    if (!analysisId) {
+        hideFeedback();
+        return;
+    }
+
+    feedbackAnalysisId = analysisId;
+    feedbackRating = null;
+    attachFeedbackListeners();
+
+    document.getElementById('feedbackPrompt').textContent = 'Was this right?';
+    document.getElementById('feedbackUp').classList.remove('selected');
+    document.getElementById('feedbackDown').classList.remove('selected');
+    document.getElementById('feedbackCommentBox').style.display = 'none';
+    document.getElementById('feedbackComment').value = '';
+    setFeedbackStatus('');
+    section.style.display = 'block';
+}
+
+function setFeedbackStatus(text, isError = false) {
+    const status = document.getElementById('feedbackStatus');
+    status.textContent = text;
+    status.className = isError ? 'feedback-status error' : 'feedback-status';
+}
+
+function attachFeedbackListeners() {
+    if (feedbackListenersAttached) {
+        return;
+    }
+    feedbackListenersAttached = true;
+
+    document.getElementById('feedbackUp')
+        .addEventListener('click', () => rateAnalysis('up'));
+    document.getElementById('feedbackDown')
+        .addEventListener('click', () => rateAnalysis('down'));
+    document.getElementById('feedbackSend')
+        .addEventListener('click', sendFeedbackComment);
+}
+
+// A thumb is sent the moment it is clicked, before any comment is written.
+// Most people click and close, and that click is the signal worth having.
+function rateAnalysis(rating) {
+    feedbackRating = rating;
+
+    document.getElementById('feedbackUp')
+        .classList.toggle('selected', rating === 'up');
+    document.getElementById('feedbackDown')
+        .classList.toggle('selected', rating === 'down');
+
+    document.getElementById('feedbackPrompt').textContent = rating === 'down'
+        ? 'Thanks \u2014 what was wrong?'
+        : 'Thanks \u2014 anything to add?';
+    document.getElementById('feedbackComment').placeholder = rating === 'down'
+        ? 'What did it get wrong? (optional)'
+        : 'Optional';
+    document.getElementById('feedbackCommentBox').style.display = 'block';
+
+    // Both thumbs stay live, so a mis-click can be corrected; whatever has
+    // been typed goes along with the correction rather than being dropped.
+    const comment = document.getElementById('feedbackComment').value.trim();
+    sendFeedback(rating, comment, () => setFeedbackStatus(''));
+}
+
+function sendFeedbackComment() {
+    const comment = document.getElementById('feedbackComment').value.trim();
+    if (!feedbackRating || !comment) {
+        document.getElementById('feedbackCommentBox').style.display = 'none';
+        return;
+    }
+
+    sendFeedback(feedbackRating, comment, () => {
+        document.getElementById('feedbackCommentBox').style.display = 'none';
+        document.getElementById('feedbackPrompt').textContent =
+            '\u2713 Thanks for the feedback.';
+    });
+}
+
+// The popup never calls the backend itself; the worker does, so a popup closed
+// right after a click does not take the call with it.
+function sendFeedback(rating, comment, onSent) {
+    const analysisId = feedbackAnalysisId;
+    setFeedbackStatus('Sending\u2026');
+
+    chrome.runtime.sendMessage({
+        type: 'SEND_ANALYSIS_FEEDBACK',
+        analysis_id: analysisId,
+        rating: rating,
+        comment: comment || undefined
+    }, function (response) {
+        // A new analysis may have replaced this one while the call was out;
+        // its controls are not the ones to report into.
+        if (feedbackAnalysisId !== analysisId) {
+            return;
+        }
+
+        if (chrome.runtime.lastError || !response || !response.ok) {
+            setFeedbackStatus('Could not send that \u2014 try again.', true);
+            return;
+        }
+
+        onSent();
+    });
 }
 
 // A page that is neither a product nor a menu. Not an error — most of the web
