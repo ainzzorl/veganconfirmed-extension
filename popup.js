@@ -662,6 +662,7 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
 const MENU_VERDICT_GROUPS = [
     { verdict: 'vegan', label: '\u{1F331} Vegan' },
     { verdict: 'likely_vegan', label: '\u{1F33F} Likely vegan' },
+    { verdict: 'veganizable', label: '\u{1F504} Can be made vegan' },
     { verdict: 'unclear', label: '\u{2753} Unclear — ask the staff' },
     { verdict: 'not_vegan', label: '\u{26A0}\u{FE0F} Not vegan' }
 ];
@@ -732,8 +733,10 @@ function displayMenuAnalysis(analysis) {
                 ? `<span class="menu-item-section">${sanitizeHTML(item.section)}</span>`
                 : '';
 
-            // Only worth surfacing on dishes that are not already vegan.
-            const veganizable = (item.veganizable === true && item.verdict !== 'vegan')
+            // Only worth surfacing on dishes that are not already vegan, and
+            // not under the "Can be made vegan" group, which already says it.
+            const veganizable = (item.veganizable === true &&
+                item.verdict !== 'vegan' && item.verdict !== 'veganizable')
                 ? '<span class="menu-item-tag veganizable">Can be made vegan</span>'
                 : '';
 

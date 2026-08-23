@@ -11,8 +11,9 @@ answers accordingly:
 - **A shopping item** — a vegan verdict for the product, plus a cruelty-free
   verdict for the product types that call for one.
 - **A restaurant menu** — one verdict per dish, shown in the popup grouped as
-  vegan / likely vegan / unclear / not vegan, with a restaurant-level rating.
-  This works on a restaurant's own website as well as on Google Maps.
+  vegan / likely vegan / can be made vegan / unclear / not vegan, with a
+  restaurant-level rating. This works on a restaurant's own website as well as
+  on Google Maps.
 - **Neither** — the popup says so plainly. Most of the web is neither, so this
   is a normal answer rather than an error.
 
