@@ -724,10 +724,11 @@
     }
 
     if (analysis.page_kind === "shopping_item") {
-      if (analysis.is_vegan === true) {
+      const item = analysis.shopping_item || {};
+      if (item.is_vegan === true) {
         return "\u{1F331} Vegan — see details";
       }
-      if (analysis.is_vegan === false) {
+      if (item.is_vegan === false) {
         return "\u{26A0}\u{FE0F} Not vegan — see details";
       }
       return "\u{2753} Vegan status unclear";
@@ -737,7 +738,7 @@
       return "\u{1F937} No menu found here";
     }
 
-    const items = analysis.items || [];
+    const items = (analysis.menu && analysis.menu.items) || [];
     const vegan = items.filter((item) => item.verdict === "vegan").length;
     const likely = items.filter((item) => item.verdict === "likely_vegan").length;
 

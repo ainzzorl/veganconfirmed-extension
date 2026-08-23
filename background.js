@@ -283,7 +283,10 @@ function saveToAnalysisHistory(cacheKey, analysisResult, timestamp, payload) {
     chrome.storage.local.get(['analysis_history'], function (result) {
         const history = result.analysis_history || [];
         const analysis = analysisResult.analysis || {};
-        const items = analysis.items || [];
+        // The per-kind halves of the response. Only one is ever filled.
+        const item = analysis.shopping_item || {};
+        const menu = analysis.menu || {};
+        const items = menu.items || [];
         const countOf = (verdict) => items.filter(item => item.verdict === verdict).length;
 
         const historyEntry = {
@@ -293,27 +296,27 @@ function saveToAnalysisHistory(cacheKey, analysisResult, timestamp, payload) {
             place_key: payload.place_id || undefined,
             timestamp: timestamp,
             date: new Date(timestamp).toLocaleString(),
-            title: analysis.restaurant_name ||
+            title: menu.restaurant_name ||
                 payload.restaurant_name ||
                 payload.title ||
                 getPageTitleFromUrl(payload.url) ||
                 'Unknown Page',
-            confidence_level: analysis.confidence_level,
+            confidence_level: item.confidence_level,
             summary: clip(analysis.summary, 150),
             explanation: clip(analysis.explanation, 150),
             user_avoided_ingredients: analysis.user_avoided_ingredients || []
         };
 
         if (analysis.page_kind === 'restaurant_menu') {
-            historyEntry.is_restaurant_menu = analysis.is_restaurant_menu;
+            historyEntry.is_restaurant_menu = true;
             historyEntry.item_count = items.length;
             historyEntry.vegan_count = countOf('vegan');
             historyEntry.likely_vegan_count = countOf('likely_vegan');
-            historyEntry.vegan_friendliness = analysis.vegan_friendliness;
+            historyEntry.vegan_friendliness = menu.vegan_friendliness;
         } else {
-            historyEntry.is_vegan = analysis.is_vegan;
-            historyEntry.is_shopping_item = analysis.is_shopping_item;
-            historyEntry.is_cruelty_free = analysis.is_cruelty_free;
+            historyEntry.is_vegan = item.is_vegan;
+            historyEntry.is_shopping_item = analysis.page_kind === 'shopping_item';
+            historyEntry.is_cruelty_free = item.is_cruelty_free;
         }
 
         // Add to beginning of history (most recent first)
@@ -408,7 +411,7 @@ function applyAnalysisOutcome(analysis) {
     }
 
     if (analysis.page_kind === 'shopping_item') {
-        if (analysis.is_vegan === false) {
+        if (analysis.shopping_item && analysis.shopping_item.is_vegan === false) {
             console.log('Non-vegan shopping item detected, triggering popup');
             triggerWarningPopup(analysis, 'non_vegan');
         }
@@ -549,7 +552,7 @@ async function runPageAnalysis(payload) {
 // non-vegan product warning this is informational, so it does not force the
 // popup open or raise a notification.
 function setMenuBadge(analysis) {
-    const items = (analysis && analysis.items) || [];
+    const items = (analysis && analysis.menu && analysis.menu.items) || [];
     const veganCount = items.filter(item =>
         item.verdict === 'vegan' || item.verdict === 'likely_vegan'
     ).length;

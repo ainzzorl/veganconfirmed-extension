@@ -34,7 +34,7 @@ function resolvePageKind(analysis) {
     if (analysis.page_kind) {
         return analysis.page_kind;
     }
-    if (analysis.is_restaurant_menu !== undefined || analysis.type === 'menu') {
+    if (analysis.type === 'menu') {
         return 'restaurant_menu';
     }
     return analysis.is_shopping_item === true ? 'shopping_item' : 'other';
@@ -528,6 +528,10 @@ function displayOtherAnalysis(analysis) {
 }
 
 function displayItemAnalysis(analysis, isWarningAnalysis = false) {
+    // The product verdict and its confidence live on the shopping_item branch;
+    // explanation, summary and the avoid-list hits stay on the analysis itself.
+    const item = analysis.shopping_item || {};
+
     // Hide loading, show content
     document.getElementById('loading').style.display = 'none';
     document.getElementById('menu-content').style.display = 'none';
@@ -539,12 +543,12 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     // Determine the item text based on whether this is a warning analysis
     const itemText = isWarningAnalysis ? 'The last added item' : 'This item';
 
-    if (analysis.is_vegan === true) {
+    if (item.is_vegan === true) {
         let statusText = `\u{1F331} ${itemText} is VEGAN`;
 
         // Update text based on confidence level
-        if (analysis.confidence_level) {
-            const confidence = analysis.confidence_level.toLowerCase();
+        if (item.confidence_level) {
+            const confidence = item.confidence_level.toLowerCase();
             if (confidence === 'low') {
                 statusText = `\u{1F331} ${itemText} MAY be vegan`;
             } else if (confidence === 'medium') {
@@ -556,13 +560,13 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
 
         statusElement.textContent = statusText;
         statusElement.className = 'vegan-status vegan';
-    } else if (analysis.is_vegan === false) {
+    } else if (item.is_vegan === false) {
         let statusText = `\u{26A0}\u{FE0F} ${itemText} is NOT VEGAN`;
         let statusClass = 'vegan-status not-vegan';
 
         // Update text based on confidence level
-        if (analysis.confidence_level) {
-            const confidence = analysis.confidence_level.toLowerCase();
+        if (item.confidence_level) {
+            const confidence = item.confidence_level.toLowerCase();
             if (confidence === 'low') {
                 statusText = `\u{2753} ${itemText} MAY NOT be vegan`;
             } else if (confidence === 'medium') {
@@ -575,8 +579,8 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
         statusElement.textContent = statusText;
 
         // Add confidence-based styling for non-vegan items
-        if (analysis.confidence_level) {
-            const confidence = analysis.confidence_level.toLowerCase();
+        if (item.confidence_level) {
+            const confidence = item.confidence_level.toLowerCase();
             statusClass += ` ${confidence}-confidence`;
         }
 
@@ -588,8 +592,8 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
 
     // Display confidence level
     const confidenceElement = document.getElementById('confidence');
-    confidenceElement.textContent = analysis.confidence_level
-        ? `Confidence: ${analysis.confidence_level.toUpperCase()}`
+    confidenceElement.textContent = item.confidence_level
+        ? `Confidence: ${item.confidence_level.toUpperCase()}`
         : '';
 
     // Display explanation
@@ -624,30 +628,30 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     const crueltyFreeExplanation = document.getElementById('crueltyFreeExplanation');
 
     // Only show cruelty-free section if is_cruelty_free is not null (applicable product type)
-    if (analysis.is_cruelty_free !== null && analysis.is_cruelty_free !== undefined) {
+    if (item.is_cruelty_free !== null && item.is_cruelty_free !== undefined) {
         crueltyFreeSection.style.display = 'block';
 
-        if (analysis.is_cruelty_free === true) {
+        if (item.is_cruelty_free === true) {
             crueltyFreeStatus.textContent = '\u{1F430} Cruelty-Free';
             crueltyFreeStatus.className = 'cruelty-status cruelty-free';
-        } else if (analysis.is_cruelty_free === false) {
+        } else if (item.is_cruelty_free === false) {
             crueltyFreeStatus.textContent = '\u{26A0}\u{FE0F} Not Cruelty-Free';
             crueltyFreeStatus.className = 'cruelty-status not-cruelty-free';
         }
 
         // Display cruelty-free explanation if available
-        if (analysis.cruelty_free_explanation) {
-            crueltyFreeExplanation.textContent = analysis.cruelty_free_explanation;
+        if (item.cruelty_free_explanation) {
+            crueltyFreeExplanation.textContent = item.cruelty_free_explanation;
             crueltyFreeExplanation.style.display = 'block';
         } else {
             crueltyFreeExplanation.style.display = 'none';
         }
-    } else if (analysis.cruelty_free_explanation && analysis.is_cruelty_free === null) {
+    } else if (item.cruelty_free_explanation && item.is_cruelty_free === null) {
         // Show section with unknown status if there's an explanation but no determination
         crueltyFreeSection.style.display = 'block';
         crueltyFreeStatus.textContent = '\u{2753} Cruelty-Free Status Unknown';
         crueltyFreeStatus.className = 'cruelty-status cruelty-unknown';
-        crueltyFreeExplanation.textContent = analysis.cruelty_free_explanation;
+        crueltyFreeExplanation.textContent = item.cruelty_free_explanation;
         crueltyFreeExplanation.style.display = 'block';
     } else {
         crueltyFreeSection.style.display = 'none';
@@ -676,17 +680,20 @@ function displayMenuAnalysis(analysis) {
     const menuContent = document.getElementById('menu-content');
     menuContent.style.display = 'block';
 
+    const menu = analysis.menu;
+
     document.getElementById('menuRestaurant').textContent =
-        analysis.restaurant_name || 'This restaurant';
+        (menu && menu.restaurant_name) || 'This restaurant';
 
     const friendlinessElement = document.getElementById('menuFriendliness');
     const confidenceElement = document.getElementById('menuConfidence');
     const summaryElement = document.getElementById('menuSummary');
     const itemsElement = document.getElementById('menuItems');
 
-    // No menu on the page is a normal outcome on Maps, not an error: many
-    // restaurants only link out to a menu or show photos of one.
-    if (analysis.is_restaurant_menu === false) {
+    // No menu branch means there was nothing to read. A normal outcome on
+    // Maps, not an error: many restaurants only link out to a menu or show
+    // photos of one.
+    if (!menu) {
         friendlinessElement.textContent = '\u{1F937} No menu found on this page';
         friendlinessElement.className = 'vegan-status unknown';
         confidenceElement.textContent = '';
@@ -696,18 +703,18 @@ function displayMenuAnalysis(analysis) {
         return;
     }
 
-    const friendliness = analysis.vegan_friendliness || 'none';
+    const friendliness = menu.vegan_friendliness || 'none';
     friendlinessElement.textContent =
         FRIENDLINESS_TEXT[friendliness] || FRIENDLINESS_TEXT.none;
     friendlinessElement.className = `vegan-status friendliness-${friendliness}`;
 
-    confidenceElement.textContent = analysis.confidence_level
-        ? `Confidence: ${analysis.confidence_level.toUpperCase()}`
-        : '';
+    // A menu has no single confidence: it answers per dish, through each
+    // verdict (including "unclear") and through vegan_friendliness above.
+    confidenceElement.textContent = '';
 
     summaryElement.textContent = analysis.summary || 'No summary available';
 
-    const items = analysis.items || [];
+    const items = menu.items || [];
     if (items.length === 0) {
         itemsElement.innerHTML =
             '<div class="menu-empty">No dishes could be read from this menu.</div>';
