@@ -29,21 +29,21 @@ function getPageLanguage() {
   return null;
 }
 
-// Function to clean up duplicate new lines in markdown
+// Strip the whitespace the HTML source leaks into the markdown: indentation,
+// tabs and non-breaking spaces are not content and only cost tokens.
 function cleanMarkdown(markdown) {
-  // Replace multiple consecutive new lines with maximum of 2
-  let cleaned = markdown.replace(/\n{3,}/g, "\n\n");
+  const lines = markdown
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => collapseWhitespace(line));
 
-  // Remove new lines that are just whitespace
-  cleaned = cleaned.replace(/\n\s*\n/g, "\n\n");
+  // At most one blank line between blocks.
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
-  // Remove leading/trailing new lines
-  cleaned = cleaned.replace(/^\n+/, "").replace(/\n+$/, "");
-
-  // Replace multiple spaces with single space
-  cleaned = cleaned.replace(/[ ]{2,}/g, " ");
-
-  return cleaned;
+// One line of rendered text: `\s`/`trim` cover tabs and non-breaking spaces too.
+function collapseWhitespace(text) {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 // Heuristic: detect text nodes that are really an embedded JSON/JS data blob
@@ -69,7 +69,9 @@ function elementToMarkdown(element) {
     if (looksLikeDataBlob(element.textContent)) {
       return "";
     }
-    return element.textContent;
+    // Collapse whitespace the way the browser renders it: a pretty-printed page
+    // otherwise leaks its own indentation and line breaks into the markdown.
+    return element.textContent.replace(/\s+/g, " ");
   }
 
   if (element.nodeType !== Node.ELEMENT_NODE) {
@@ -77,7 +79,7 @@ function elementToMarkdown(element) {
   }
 
   const tagName = element.tagName.toLowerCase();
-  const textContent = element.textContent.trim();
+  const textContent = collapseWhitespace(element.textContent);
 
   if (!textContent) {
     return "";
@@ -112,12 +114,12 @@ function elementToMarkdown(element) {
       return `> ${textContent}\n\n`;
     case "ul":
       const ulItems = Array.from(element.querySelectorAll("li"))
-        .map((li) => `- ${li.textContent.trim()}`)
+        .map((li) => `- ${collapseWhitespace(li.textContent)}`)
         .join("\n");
       return `${ulItems}\n\n`;
     case "ol":
       const olItems = Array.from(element.querySelectorAll("li"))
-        .map((li, index) => `${index + 1}. ${li.textContent.trim()}`)
+        .map((li, index) => `${index + 1}. ${collapseWhitespace(li.textContent)}`)
         .join("\n");
       return `${olItems}\n\n`;
     case "li":
