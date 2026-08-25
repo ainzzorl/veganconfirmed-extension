@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "jsdom": "^24.1.0",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "web-ext": "^10.6.0"
   }
 }

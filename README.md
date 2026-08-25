@@ -97,4 +97,27 @@ to show a result as soon as it opens, and it asks for the value over a
 - To support an additional Google ccTLD, add it to the `maps.js` entry in
   `manifest.json`.
 
+## Releasing
+
+Bump `version` in `manifest.json`, add a `CHANGELOG.md` entry, and put both on
+a branch named `release/<version>` — `make deploy-firefox` refuses to run
+anywhere else, so a submission always traces to one branch. Then:
+
+- **Chrome** — `make package`, and upload `build/vegan-confirmed.zip` by hand.
+- **Firefox** — `make deploy-firefox` submits the version to the listed channel
+  on addons.mozilla.org and returns without waiting for review. Listing
+  metadata (screenshots, categories, description) is edited in the Developer
+  Hub, not from here.
+
+Both package from `build/vegan-confirmed`, which holds exactly the files named
+in the Makefile's `SOURCES` — the dev tooling and these docs are not shipped.
+`make check-flags`, which both depend on, refuses to build unless the two
+local-testing flags above are back at their shipping values.
+
+`make deploy-firefox` needs AMO credentials: `cp .env.example .env` and fill in
+a key pair from addons.mozilla.org/developers/addon/api/key/. `.env` is
+gitignored.
+
+`make lint-firefox` runs the AMO validator locally without uploading anything.
+
 # veganconfirmed-extension
