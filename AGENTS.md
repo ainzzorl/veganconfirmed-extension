@@ -1,9 +1,11 @@
 # AGENTS.md
 
-## Git
+## Git workflow
 
-- Commit directly to `main` by default; don't create branches unless asked.
-- Don't push unless asked.
+- Committing directly to `main` is fine by default.
+- Do not create branches unless explicitly asked to.
+- Do not commit or push unless explicitly asked to.
+- Commit message should be brief. One sentence is usually enough. One paragraph at the most.
 
 ## Code and docs
 
