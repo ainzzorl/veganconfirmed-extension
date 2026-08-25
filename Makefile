@@ -6,6 +6,7 @@ SOURCES = manifest.json background.js content.js content.css maps.js maps.css \
 STAGE = build/vegan-confirmed
 ZIP = build/vegan-confirmed.zip
 WEB_EXT = node_modules/.bin/web-ext
+CWS = node_modules/.bin/chrome-webstore-upload
 VERSION = $(shell node -p "require('./manifest.json').version")
 
 # The flags at the top of background.js are meant to be flipped while testing;
@@ -28,7 +29,7 @@ lint-firefox: stage
 # version's release branch.
 check-branch:
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
-	test "$$branch" = "release/$(VERSION)" || { echo "deploy-firefox must run from release/$(VERSION), not $$branch"; exit 1; }
+	test "$$branch" = "release/$(VERSION)" || { echo "a deploy must run from release/$(VERSION), not $$branch"; exit 1; }
 
 # Submits a new version to the listed channel on addons.mozilla.org. Needs
 # WEB_EXT_API_KEY and WEB_EXT_API_SECRET in .env; see README.
@@ -38,4 +39,12 @@ deploy-firefox: check-branch lint-firefox
 	$(WEB_EXT) sign --source-dir=$(STAGE) --artifacts-dir=build \
 	  --channel=listed --approval-timeout=0
 
-.PHONY: check-flags check-branch stage package lint-firefox deploy-firefox
+# Uploads a new version to the Chrome Web Store and submits it for review.
+# Needs EXTENSION_ID, PUBLISHER_ID, CLIENT_ID, CLIENT_SECRET and REFRESH_TOKEN
+# in .env; see README.
+deploy-chrome: check-branch package
+	@test -f .env || { echo "No .env with EXTENSION_ID / PUBLISHER_ID / CLIENT_ID / CLIENT_SECRET / REFRESH_TOKEN; see README"; exit 1; }
+	set -a && . ./.env && set +a && \
+	$(CWS) --source $(ZIP)
+
+.PHONY: check-flags check-branch stage package lint-firefox deploy-firefox deploy-chrome
