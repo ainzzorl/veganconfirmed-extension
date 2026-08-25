@@ -19,8 +19,8 @@ console.log('Background script loaded');
 // This is the single source of truth for both. popup.js needs CACHE_ENABLED
 // too (it reads cached analyses directly) and asks for it over
 // GET_CACHE_ENABLED rather than keeping a copy that could drift out of sync.
-const USE_LOCAL_BACKEND = true;
-const CACHE_ENABLED = false;
+const USE_LOCAL_BACKEND = false;
+const CACHE_ENABLED = true;
 
 // Backend API configuration
 const PROD_BACKEND_URL = 'https://api.veganconfirmed.com';
