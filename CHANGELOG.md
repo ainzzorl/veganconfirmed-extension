@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2
+
+- Drop "Check Menu" button on Google Maps
+
 ## 2.0.1
 
 - Fix errors connecting to the server.
