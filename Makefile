@@ -1,6 +1,6 @@
 # Everything the extension ships, and nothing else. A file not listed here
 # never reaches a store.
-SOURCES = manifest.json background.js content.js content.css maps.js maps.css \
+SOURCES = manifest.json background.js content.js content.css maps.js \
           popup.html popup.js pdf_extract.mjs icons vendor LICENSE
 
 STAGE = build/vegan-confirmed

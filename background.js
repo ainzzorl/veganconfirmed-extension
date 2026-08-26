@@ -433,7 +433,7 @@ function applyAnalysisOutcome(analysis) {
 // Analyses currently in flight, keyed the way the cache is.
 //
 // This is the only place the backend is called, so one map covers every
-// trigger: the popup button, the Maps chip, an add-to-cart click. It matters
+// trigger: the popup button, an add-to-cart click. It matters
 // most for a popup reopened mid-analysis, which cannot see the request it
 // started and would otherwise pay for the same answer a second time.
 //
@@ -733,9 +733,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     error: ANALYSIS_FAILED_MESSAGE
                 });
 
-            // The Maps chip lives in the content script, so the originating tab
-            // is told the outcome as well as the popup. Pages without a chip
-            // simply have no listener for it.
+            // maps.js holds an in-flight flag while it waits for a verdict, so
+            // the originating tab is told the outcome as well as the popup.
+            // Other pages simply have no listener for it.
             const tabMessage = result
                 ? { type: 'PAGE_ANALYSIS_DONE', result: result }
                 : { type: 'PAGE_ANALYSIS_FAILED' };

@@ -29,7 +29,6 @@ const MUST_NOT_LEAK = {
   "maps.js": [
     "enableLogging",
     "isAnalyzing",
-    "chipEl",
     "lastPlaceKey",
     "getPlaceKey",
     "extractPanelText",

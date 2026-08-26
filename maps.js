@@ -92,17 +92,15 @@
   const NOISE_LINE_RE =
     /^(directions|save|nearby|send to phone|share|suggest an edit|add a (photo|label)|claim this business|write a review|all reviews|see photos|photos|street view|website|call|order online|reserve a table|add your business|report a problem)$/i;
 
-  // How long the chip waits for a verdict before giving up on one.
+  // How long this script waits for a verdict before giving up on one.
   //
   // Not a deadline for the analysis — the service worker owns that — but a
   // watchdog for the answer never arriving at all, which happens if the worker
-  // is recycled mid-request. Without it the chip reads "Analyzing menu…"
-  // forever and `isAnalyzing` blocks every retry until the user navigates
-  // away. Set past the popup's own ceiling so the chip is the last to give up.
-  const CHIP_WATCHDOG_MS = 150000;
+  // is recycled mid-request. Without it `isAnalyzing` blocks every retry until
+  // the user navigates away.
+  const ANALYSIS_WATCHDOG_MS = 150000;
 
   let isAnalyzing = false;
-  let chipEl = null;
   let lastPlaceKey = null;
   let analysisWatchdog = null;
 
@@ -520,7 +518,7 @@
     };
   }
 
-  async function extractMenuSections(panel, menuTab, onProgress) {
+  async function extractMenuSections(panel, menuTab) {
     const options = menuTab ? findMenuSectionOptions(panel, menuTab) : [];
 
     if (options.length === 0) {
@@ -546,10 +544,6 @@
         break;
       }
       activePanel = live.panel;
-
-      if (onProgress) {
-        onProgress(index + 1, total);
-      }
 
       await activateSection(activePanel, option);
       await scrollToLoad(activePanel);
@@ -579,7 +573,7 @@
     };
   }
 
-  async function extractMenu(onProgress) {
+  async function extractMenu() {
     const panel = findPlacePanel();
     if (!panel) {
       throw new Error("Could not find the place panel on this page.");
@@ -587,11 +581,7 @@
 
     const restaurantName = getPlaceName(panel);
     const menuTab = await activateMenuTab(panel);
-    const { content, sections } = await extractMenuSections(
-      panel,
-      menuTab,
-      onProgress
-    );
+    const { content, sections } = await extractMenuSections(panel, menuTab);
 
     if (!content) {
       throw new Error("Could not read any text from the place panel.");
@@ -612,46 +602,6 @@
     };
   }
 
-  // --- trigger chip --------------------------------------------------------
-
-  function ensureChip() {
-    if (chipEl && document.body.contains(chipEl)) {
-      return chipEl;
-    }
-
-    chipEl = document.createElement("button");
-    chipEl.className = "vegan-menu-chip";
-    chipEl.type = "button";
-    chipEl.addEventListener("click", () => {
-      triggerMenuAnalysis();
-    });
-    document.body.appendChild(chipEl);
-    setChipState("idle");
-    return chipEl;
-  }
-
-  function removeChip() {
-    if (chipEl && chipEl.parentNode) {
-      chipEl.parentNode.removeChild(chipEl);
-    }
-    chipEl = null;
-  }
-
-  function setChipState(state, text) {
-    if (!chipEl) {
-      return;
-    }
-    chipEl.className = `vegan-menu-chip ${state}`;
-    chipEl.disabled = state === "loading";
-
-    const labels = {
-      idle: "\u{1F331} Check menu",
-      loading: "Analyzing menu…",
-      error: "\u{26A0}\u{FE0F} Menu check failed",
-    };
-    chipEl.textContent = text || labels[state] || labels.idle;
-  }
-
   // --- analysis flow -------------------------------------------------------
 
   function armWatchdog() {
@@ -661,10 +611,9 @@
       if (!isAnalyzing) {
         return;
       }
-      log("no verdict arrived, releasing the chip");
+      log("no verdict arrived, releasing the in-flight flag");
       isAnalyzing = false;
-      setChipState("error");
-    }, CHIP_WATCHDOG_MS);
+    }, ANALYSIS_WATCHDOG_MS);
   }
 
   function clearWatchdog() {
@@ -684,15 +633,9 @@
     }
 
     isAnalyzing = true;
-    ensureChip();
-    setChipState("loading");
 
     try {
-      // Sweeping a split menu makes the panel visibly flip through its sub-tabs,
-      // which looks like a glitch unless the chip says what is going on.
-      const payload = await extractMenu((done, total) => {
-        setChipState("loading", `Analyzing menu… ${done}/${total}`);
-      });
+      const payload = await extractMenu();
       log("extracted menu payload", payload);
       chrome.runtime.sendMessage({ type: "PAGE_FOR_ANALYSIS", payload: payload });
       armWatchdog();
@@ -700,7 +643,6 @@
     } catch (error) {
       console.error("Vegan Confirmed: menu extraction failed:", error);
       isAnalyzing = false;
-      setChipState("error");
       // The place is sent along so the background can file the failure under
       // the same key the analysis would have been cached under, and a popup
       // reopened afterwards sees it rather than an idle screen.
@@ -713,54 +655,15 @@
     }
   }
 
-  // Summarise the result for the chip, which has room for one line.
-  //
-  // A place panel usually yields a menu, but not always: some listings carry
-  // only hours and reviews, and the backend answers with whatever kind of page
-  // it actually found rather than forcing a menu verdict.
-  function summarizeForChip(analysis) {
-    if (!analysis) {
-      return "\u{1F937} No menu found here";
-    }
-
-    if (analysis.page_kind === "shopping_item") {
-      const item = analysis.shopping_item || {};
-      if (item.is_vegan === true) {
-        return "\u{1F331} Vegan — see details";
-      }
-      if (item.is_vegan === false) {
-        return "\u{26A0}\u{FE0F} Not vegan — see details";
-      }
-      return "\u{2753} Vegan status unclear";
-    }
-
-    if (analysis.page_kind !== "restaurant_menu") {
-      return "\u{1F937} No menu found here";
-    }
-
-    const items = (analysis.menu && analysis.menu.items) || [];
-    const vegan = items.filter((item) => item.verdict === "vegan").length;
-    const likely = items.filter((item) => item.verdict === "likely_vegan").length;
-
-    if (vegan + likely === 0) {
-      return "\u{26A0}\u{FE0F} No vegan dishes found";
-    }
-
-    const parts = [];
-    if (vegan) {
-      parts.push(`${vegan} vegan`);
-    }
-    if (likely) {
-      parts.push(`${likely} likely`);
-    }
-    return `\u{1F331} ${parts.join(", ")} — see details`;
-  }
-
   // --- SPA navigation ------------------------------------------------------
 
   // Maps swaps places without a page load, so watch for URL changes rather than
   // relying on load events. `history.pushState` is patched (Maps navigates that
   // way) and a low-frequency poll covers replaceState/back-forward.
+  //
+  // Leaving a place mid-analysis releases the in-flight flag: the verdict that
+  // arrives afterwards is for the place the user has left, and without this the
+  // next place could not be analyzed until the watchdog fired.
   function handleLocationChange() {
     const placeKey = isPlacePage() ? getPlaceKey() : null;
     if (placeKey === lastPlaceKey) {
@@ -773,10 +676,6 @@
 
     if (placeKey) {
       log("place page detected:", placeKey);
-      ensureChip();
-      setChipState("idle");
-    } else {
-      removeChip();
     }
   }
 
@@ -817,18 +716,11 @@
         return false;
       }
 
-      if (message.type === "PAGE_ANALYSIS_DONE") {
+      // The outcome is what releases the in-flight flag, so the next trigger
+      // does not have to wait out the watchdog.
+      if (message.type === "PAGE_ANALYSIS_DONE" || message.type === "PAGE_ANALYSIS_FAILED") {
         clearWatchdog();
         isAnalyzing = false;
-        setChipState("done", summarizeForChip(message.result && message.result.analysis));
-        sendResponse({ status: "received" });
-        return false;
-      }
-
-      if (message.type === "PAGE_ANALYSIS_FAILED") {
-        clearWatchdog();
-        isAnalyzing = false;
-        setChipState("error");
         sendResponse({ status: "received" });
         return false;
       }
@@ -852,7 +744,6 @@
       splitSharedEdges,
       joinSections,
       extractMenuSections,
-      summarizeForChip,
     };
   }
 })();

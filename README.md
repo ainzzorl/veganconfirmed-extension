@@ -29,9 +29,9 @@ page's URL still decides:
 - `content.js` (all URLs) extracts the page as markdown. It also triggers
   automatically when an "add to cart" button is clicked, and a non-vegan
   product forces the popup open.
-- `maps.js` (Google Maps place pages) puts a "🌱 Check menu" chip on the page
-  and reads the place panel instead: it activates the Menu tab and scrolls so
-  lazy-loaded dishes render, which the generic extractor cannot do.
+- `maps.js` (Google Maps place pages) reads the place panel instead: it
+  activates the Menu tab and scrolls so lazy-loaded dishes render, which the
+  generic extractor cannot do.
 
 Both content scripts receive the popup's trigger and divide the work by URL, so
 exactly one of them answers. `tools/check_extractor_ownership.js` enforces that

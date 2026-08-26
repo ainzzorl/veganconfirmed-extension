@@ -189,12 +189,7 @@ async function main() {
     "fixture is not faithful: clicking a detached tab still changed the panel"
   );
 
-  const progress = [];
-  const swept = await maps.extractMenuSections(
-    rebuilt.panel,
-    rebuilt.menuTab,
-    (done, total) => progress.push(`${done}/${total}`)
-  );
+  const swept = await maps.extractMenuSections(rebuilt.panel, rebuilt.menuTab);
   assert.deepStrictEqual(
     swept.sections,
     ["Lunch", "Dinner", "Drinks"],
@@ -205,8 +200,7 @@ async function main() {
       assert.ok(swept.content.includes(dish), `"${dish}" lost across a rebuild`);
     }
   }
-  assert.deepStrictEqual(progress, ["1/3", "2/3", "3/3"], "progress not reported");
-  console.log("survives Maps rebuilding the tab row, progress reported");
+  console.log("survives Maps rebuilding the tab row");
 
   // --- finding the sub-tabs without aria-controls to scope by --------------
   const loose = buildPanel({ wireAriaControls: false });

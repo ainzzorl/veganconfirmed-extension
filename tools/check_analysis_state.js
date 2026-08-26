@@ -175,7 +175,7 @@ async function main() {
   );
   say("done record survived the failed broadcast ->", record().status);
 
-  // The Maps chip is told directly, independently of the popup.
+  // maps.js is told directly, independently of the popup.
   assert.ok(
     tabMessages.some((m) => m.tabId === TAB && m.message.type === "PAGE_ANALYSIS_DONE"),
     "the originating tab is told the outcome"
