@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.3
+
+- Drop "Materials & Ingredients to Avoid" settings
+
 ## 2.0.2
 
 - Drop "Check Menu" button on Google Maps
