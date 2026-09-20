@@ -25,6 +25,11 @@ package: stage
 lint-firefox: stage
 	$(WEB_EXT) lint --source-dir=$(STAGE)
 
+# A deploy ships the working tree, so whatever goes to a store must be exactly
+# what the release branch records.
+check-clean:
+	@test -z "$$(git status --porcelain)" || { echo "uncommitted changes in the working tree"; git status --short; exit 1; }
+
 # A store submission is tied to one version, so it may only go out from that
 # version's release branch.
 check-branch:
@@ -33,7 +38,7 @@ check-branch:
 
 # Submits a new version to the listed channel on addons.mozilla.org. Needs
 # WEB_EXT_API_KEY and WEB_EXT_API_SECRET in .env; see README.
-deploy-firefox: check-branch lint-firefox
+deploy-firefox: check-clean check-branch lint-firefox
 	@test -f .env || { echo "No .env with WEB_EXT_API_KEY / WEB_EXT_API_SECRET; see README"; exit 1; }
 	set -a && . ./.env && set +a && \
 	$(WEB_EXT) sign --source-dir=$(STAGE) --artifacts-dir=build \
@@ -42,9 +47,9 @@ deploy-firefox: check-branch lint-firefox
 # Uploads a new version to the Chrome Web Store and submits it for review.
 # Needs EXTENSION_ID, PUBLISHER_ID, CLIENT_ID, CLIENT_SECRET and REFRESH_TOKEN
 # in .env; see README.
-deploy-chrome: check-branch package
+deploy-chrome: check-clean check-branch package
 	@test -f .env || { echo "No .env with EXTENSION_ID / PUBLISHER_ID / CLIENT_ID / CLIENT_SECRET / REFRESH_TOKEN; see README"; exit 1; }
 	set -a && . ./.env && set +a && \
 	$(CWS) --source $(ZIP)
 
-.PHONY: check-flags check-branch stage package lint-firefox deploy-firefox deploy-chrome
+.PHONY: check-flags check-clean check-branch stage package lint-firefox deploy-firefox deploy-chrome
