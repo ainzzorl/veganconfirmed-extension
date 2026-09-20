@@ -118,18 +118,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Add click event listener to add custom ingredient button
-    document.getElementById('addCustomIngredient').addEventListener('click', function () {
-        addCustomIngredient();
-    });
-
-    // Add enter key listener for custom ingredient input
-    document.getElementById('customIngredient').addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            addCustomIngredient();
-        }
-    });
-
     function setupTabs() {
         const tabButtons = document.querySelectorAll('.tab-button');
         const tabContents = document.querySelectorAll('.tab-content');
@@ -149,11 +137,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Reload history if switching to history tab
                 if (targetTab === 'history') {
                     loadAnalysisHistory();
-                }
-
-                // Load settings if switching to settings tab
-                if (targetTab === 'settings') {
-                    loadSettings();
                 }
             });
         });
@@ -235,8 +218,6 @@ document.addEventListener('DOMContentLoaded', function () {
                         <div class="history-status ${statusClass}">${sanitizeHTML(statusText)}${crueltyFreeHTML}</div>
                         ${item.confidence_level ? `<div class="history-confidence">Confidence: ${sanitizeHTML(item.confidence_level.toUpperCase())}</div>` : ''}
                         ${item.summary ? `<div class="history-summary">${sanitizeHTML(item.summary)}</div>` : ''}
-                        ${item.user_avoided_ingredients && item.user_avoided_ingredients.length > 0 ?
-                        `<div class="history-avoided-ingredients">⚠️ Contains avoided ingredients: ${sanitizeHTML(item.user_avoided_ingredients.join(', '))}</div>` : ''}
                     </div>
                 `;
             }).join('');
@@ -665,13 +646,12 @@ function displayOtherAnalysis(analysis) {
     summaryElement.textContent = analysis.summary ||
         'There is nothing on this page to check.';
 
-    document.getElementById('avoided-ingredients').style.display = 'none';
     document.getElementById('crueltyFreeSection').style.display = 'none';
 }
 
 function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     // The product verdict and its confidence live on the shopping_item branch;
-    // the summary and the avoid-list hits stay on the analysis itself.
+    // the summary stays on the analysis itself.
     const item = analysis.shopping_item || {};
 
     // Hide loading, show content
@@ -746,22 +726,6 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
     } else {
         summaryElement.textContent = 'No summary available';
         summaryElement.className = 'explanation error';
-    }
-
-    // Display avoided ingredients if present
-    const avoidedIngredientsElement = document.getElementById('avoided-ingredients');
-    if (analysis.user_avoided_ingredients && analysis.user_avoided_ingredients.length > 0) {
-        const ingredientsList = analysis.user_avoided_ingredients.join(', ');
-        avoidedIngredientsElement.innerHTML = `
-            <div class="avoided-ingredients-warning">
-                <span class="warning-icon">⚠️</span>
-                <strong>Contains ingredients you want to avoid:</strong>
-                <div class="ingredients-list">${sanitizeHTML(ingredientsList)}</div>
-            </div>
-        `;
-        avoidedIngredientsElement.style.display = 'block';
-    } else {
-        avoidedIngredientsElement.style.display = 'none';
     }
 
     // Display cruelty-free status (only for applicable product types)
@@ -882,10 +846,6 @@ function displayMenuAnalysis(analysis) {
                 ? '<span class="menu-item-tag veganizable">Can be made vegan</span>'
                 : '';
 
-            const avoided = (item.user_avoided_ingredients && item.user_avoided_ingredients.length > 0)
-                ? `<span class="menu-item-tag avoided">\u{26A0}\u{FE0F} ${sanitizeHTML(item.user_avoided_ingredients.join(', '))}</span>`
-                : '';
-
             const reason = item.reason
                 ? `<div class="menu-item-reason">${sanitizeHTML(item.reason)}</div>`
                 : '';
@@ -894,7 +854,7 @@ function displayMenuAnalysis(analysis) {
                 <div class="menu-item ${group.verdict}">
                     <div class="menu-item-name">${sanitizeHTML(item.name)}${section}</div>
                     ${reason}
-                    ${veganizable}${avoided}
+                    ${veganizable}
                 </div>
             `;
         }).join('');
@@ -907,84 +867,3 @@ function displayMenuAnalysis(analysis) {
         `;
     }).join('');
 }
-
-// Settings management functions
-function loadSettings() {
-    chrome.storage.local.get(['custom_ingredients'], function (result) {
-        const customIngredients = result.custom_ingredients || [];
-
-        // Load custom ingredients
-        loadCustomIngredients(customIngredients);
-    });
-}
-
-function loadCustomIngredients(customIngredients) {
-    const customIngredientsList = document.getElementById('custom-ingredients-list');
-    customIngredientsList.innerHTML = '';
-
-    customIngredients.forEach(ingredient => {
-        const ingredientItem = document.createElement('div');
-        ingredientItem.className = 'ingredient-item';
-        ingredientItem.innerHTML = `
-            <span class="ingredient-label">${sanitizeHTML(ingredient)}</span>
-            <button class="ingredient-remove" data-ingredient="${sanitizeHTML(ingredient)}">×</button>
-        `;
-        customIngredientsList.appendChild(ingredientItem);
-    });
-
-    // Add event listeners to remove buttons
-    const removeButtons = customIngredientsList.querySelectorAll('.ingredient-remove');
-    removeButtons.forEach(button => {
-        button.addEventListener('click', function () {
-            const ingredient = this.getAttribute('data-ingredient');
-            removeCustomIngredient(ingredient);
-        });
-    });
-}
-
-function addCustomIngredient() {
-    const input = document.getElementById('customIngredient');
-    const ingredient = input.value.trim();
-
-    if (ingredient) {
-        chrome.storage.local.get(['custom_ingredients'], function (result) {
-            const customIngredients = result.custom_ingredients || [];
-
-            if (!customIngredients.includes(ingredient)) {
-                customIngredients.push(ingredient);
-
-                chrome.storage.local.set({ custom_ingredients: customIngredients }, function () {
-                    loadCustomIngredients(customIngredients);
-                    input.value = '';
-                    saveAllIngredients(); // Save all ingredients when custom ingredient is added
-                });
-            } else {
-                alert('This ingredient is already in your custom list.');
-            }
-        });
-    }
-}
-
-function removeCustomIngredient(ingredient) {
-    chrome.storage.local.get(['custom_ingredients'], function (result) {
-        const customIngredients = result.custom_ingredients || [];
-        const updatedIngredients = customIngredients.filter(item => item !== ingredient);
-
-        chrome.storage.local.set({ custom_ingredients: updatedIngredients }, function () {
-            loadCustomIngredients(updatedIngredients);
-            saveAllIngredients(); // Save all ingredients when custom ingredient is removed
-        });
-    });
-}
-
-function saveAllIngredients() {
-    // Get custom ingredients
-    chrome.storage.local.get(['custom_ingredients'], function (result) {
-        const customIngredients = result.custom_ingredients || [];
-
-        chrome.storage.local.set({
-            custom_ingredients: customIngredients
-        });
-    });
-}
-
