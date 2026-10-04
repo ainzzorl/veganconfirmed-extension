@@ -1,12 +1,16 @@
 # Changelog
 
+## 2.0.4
+
+- Display materials/ingredients for shopping items.
+
 ## 2.0.3
 
-- Drop "Materials & Ingredients to Avoid" settings
+- Drop "Materials & Ingredients to Avoid" settings.
 
 ## 2.0.2
 
-- Drop "Check Menu" button on Google Maps
+- Drop "Check Menu" button on Google Maps.
 
 ## 2.0.1
 
