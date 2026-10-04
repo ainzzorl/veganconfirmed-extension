@@ -646,7 +646,52 @@ function displayOtherAnalysis(analysis) {
     summaryElement.textContent = analysis.summary ||
         'There is nothing on this page to check.';
 
+    document.getElementById('ingredientsSection').style.display = 'none';
     document.getElementById('crueltyFreeSection').style.display = 'none';
+}
+
+function normalizeIngredient(name) {
+    return String(name).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// The model copies animal-derived entries out of the two lists, but not always
+// verbatim ("Leather" out of "Leather upper"), so a whole-word match counts too.
+function isAnimalDerived(name, animalDerived) {
+    const padded = ` ${normalizeIngredient(name)} `;
+    return animalDerived.some(animal => animal && padded.includes(` ${animal} `));
+}
+
+// What the page states the product is made of, then what it contains by
+// convention but leaves unsaid, with the animal-derived entries highlighted.
+// Each row is hidden when its list is empty.
+function displayIngredients(item) {
+    const animalDerived = (item.animal_derived_ingredients || []).map(normalizeIngredient);
+    const rows = [
+        ['explicitIngredients', item.explicit_ingredients],
+        ['inferredIngredients', item.inferred_ingredients]
+    ];
+    let anyShown = false;
+    for (const [id, list] of rows) {
+        const row = document.getElementById(id);
+        const container = row.querySelector('.ingredients-list');
+        const shown = Array.isArray(list) && list.length > 0;
+        row.style.display = shown ? 'block' : 'none';
+        container.replaceChildren();
+        (shown ? list : []).forEach((name, i) => {
+            if (i > 0) {
+                container.append(', ');
+            }
+            const span = document.createElement('span');
+            span.textContent = name;
+            if (isAnimalDerived(name, animalDerived)) {
+                span.className = 'ingredient-animal';
+                span.title = 'Animal-derived';
+            }
+            container.append(span);
+        });
+        anyShown = anyShown || shown;
+    }
+    document.getElementById('ingredientsSection').style.display = anyShown ? 'block' : 'none';
 }
 
 function displayItemAnalysis(analysis, isWarningAnalysis = false) {
@@ -727,6 +772,8 @@ function displayItemAnalysis(analysis, isWarningAnalysis = false) {
         summaryElement.textContent = 'No summary available';
         summaryElement.className = 'explanation error';
     }
+
+    displayIngredients(item);
 
     // Display cruelty-free status (only for applicable product types)
     const crueltyFreeSection = document.getElementById('crueltyFreeSection');
