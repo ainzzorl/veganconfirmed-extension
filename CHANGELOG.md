@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.5
+
+- Exclude Amazon customer reviews from analysis.
+
 ## 2.0.4
 
 - Display materials/ingredients for shopping items.
