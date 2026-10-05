@@ -561,6 +561,10 @@ function extractPageContent(
     "#rightCol",
     "#leftCol",
     "#averageCustomerReviews",
+    // Customer reviews: often over half the page's text, crowding the seller's
+    // own description out of the backend's token budget.
+    "#reviewsMedley",
+    "#customer-reviews_feature_div",
     "#apex_desktop",
     "#pqv-feedback",
     ".offersConsistencyEnabled",
