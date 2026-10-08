@@ -302,8 +302,7 @@ function saveToAnalysisHistory(cacheKey, analysisResult, timestamp, payload) {
                 getPageTitleFromUrl(payload.url) ||
                 'Unknown Page',
             confidence_level: item.confidence_level,
-            summary: clip(analysis.summary, 150),
-            user_avoided_ingredients: analysis.user_avoided_ingredients || []
+            summary: clip(analysis.summary, 150)
         };
 
         if (analysis.page_kind === 'restaurant_menu') {
@@ -412,13 +411,7 @@ function applyAnalysisOutcome(analysis) {
     if (analysis.page_kind === 'shopping_item') {
         if (analysis.shopping_item && analysis.shopping_item.is_vegan === false) {
             console.log('Non-vegan shopping item detected, triggering popup');
-            triggerWarningPopup(analysis, 'non_vegan');
-        }
-
-        if (analysis.user_avoided_ingredients &&
-            analysis.user_avoided_ingredients.length > 0) {
-            console.log('User avoided ingredients detected, triggering popup');
-            triggerWarningPopup(analysis, 'avoided_ingredients');
+            triggerWarningPopup(analysis);
         }
         return;
     }
@@ -532,19 +525,10 @@ async function runPageAnalysis(payload) {
             return cachedResult;
         }
 
-        // Get user's avoided ingredients from storage
-        const avoidedIngredients = await new Promise((resolve) => {
-            chrome.storage.local.get(['custom_ingredients'], function (result) {
-                resolve(result.custom_ingredients || []);
-            });
-        });
-
         const installationId = await getInstallationId();
 
-        // Add avoided ingredients to the payload for analysis
         const payloadWithSettings = {
             ...payload,
-            user_avoided_ingredients: avoidedIngredients,
             extension_version: EXTENSION_VERSION,
             installation_id: installationId
         };
@@ -599,12 +583,11 @@ function setMenuBadge(analysis) {
     }
 }
 
-// Function to trigger warning popup for non-vegan items or items with avoided ingredients
-function triggerWarningPopup(analysis, type = 'non_vegan') {
-    console.log(`Triggering ${type} popup for analysis:`, analysis);
+// Function to trigger warning popup for non-vegan items
+function triggerWarningPopup(analysis) {
+    console.log('Triggering non-vegan popup for analysis:', analysis);
 
-    // Determine badge color based on type
-    const badgeColor = type === 'avoided_ingredients' ? '#ff9800' : '#f44336'; // Orange for avoided ingredients, Red for non-vegan
+    const badgeColor = '#f44336';
 
     // Store the analysis data for the popup to access
     chrome.storage.local.set({

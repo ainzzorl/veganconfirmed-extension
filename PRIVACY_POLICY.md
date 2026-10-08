@@ -4,7 +4,7 @@
 
 ## What we collect
 
-When you check a page or click "Add to cart", the extension sends the page's address, title, text and metadata, your avoided ingredients, the extension version and a random installation ID. If you rate an answer, it sends the rating and comment.
+When you check a page or click "Add to cart", the extension sends the page's address, title, text and metadata, the extension version and a random installation ID. If you rate an answer, it sends the rating and comment.
 
 We keep this, plus your user-agent, country and a hashed IP address, to answer requests, fix wrong answers, count users and prevent abuse.
 
